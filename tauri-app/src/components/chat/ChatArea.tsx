@@ -1,10 +1,11 @@
 import { useRef, useEffect, useState, useMemo } from 'react';
 import { useChat, ToolCall } from '../../contexts/ChatContext';
 import { useProfiles } from '../../contexts/ProfileContext';
+import { useSettings } from '../../contexts/SettingsContext';
 import { useConfigurator } from '../../contexts/ConfiguratorContext';
 import { parseConfiguratorTitle } from '../../utils/configurator';
 import { MarkdownRenderer } from '../MarkdownRenderer';
-import { Loader2, Square, ArrowUp, Settings, ChevronDown, Monitor, RefreshCw, FileText, MousePointerClick, Brain, Check, X, Terminal, Pencil, Play, Send } from 'lucide-react';
+import { Loader2, Square, ArrowUp, Settings, ChevronDown, Monitor, RefreshCw, FileText, MousePointerClick, Brain, Check, X, Terminal, Pencil, Play, Send, User, HardHat } from 'lucide-react';
 import logo from '../../assets/logo.png';
 import ToolCallBlock from './ToolCallBlock';
 import { MessageActions } from './MessageActions';
@@ -85,6 +86,7 @@ export function ChatArea({
 }: ChatAreaProps) {
     const { messages, isLoading, chatStatus, currentIteration, sendMessage, stopChat, editAndRerun } = useChat();
     const { profiles, activeProfileId, setActiveProfile } = useProfiles();
+    const { settings, updateSettings } = useSettings();
     const { detectedWindows, selectedHwnd, refreshWindows, selectWindow, activeConfigTitle, getCode } = useConfigurator();
 
     const [appliedDiffMessages, setAppliedDiffMessages] = useState<Set<string>>(new Set());
@@ -544,10 +546,10 @@ export function ChatArea({
                                         setShowConfigDropdown(false);
                                     }
                                 }}
-                                    className={`flex-shrink-0 flex items-center gap-1.5 text-[12px] font-medium px-2.5 py-1.5 rounded-md transition-all border border-transparent ${showGetCodeDropdown ? 'bg-zinc-800 text-zinc-200 border-zinc-700' : 'bg-zinc-800/50 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800'}`}
+                                    className={`flex-shrink-0 flex items-center gap-1.5 text-[12px] font-medium px-2 py-1.5 rounded-md transition-all border border-transparent ${showGetCodeDropdown ? 'bg-zinc-800 text-zinc-200 border-zinc-700' : 'bg-zinc-800/50 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800'}`}
                                 >
                                     <FileText className="w-3.5 h-3.5" />
-                                    <span className="hidden sm:inline">Получить код</span>
+                                    <span className="hidden xl:inline">Код</span>
                                 </button>
                                 {showGetCodeDropdown && (
                                     <div className="absolute bottom-full right-0 mb-2 w-max min-w-[180px] bg-[#1f1f23] border border-[#27272a] rounded-lg shadow-2xl z-30 ring-1 ring-black/20 p-1 flex flex-col">
@@ -562,6 +564,54 @@ export function ChatArea({
                                     </div>
                                 )}
                             </div>
+
+                            {/* Behavior Preset Toggle */}
+                            {settings?.code_generation && (
+                                <div className="flex items-center bg-zinc-800/30 border border-zinc-700/50 rounded-lg p-0.5 flex-shrink-0">
+                                    <button
+                                        onClick={() => {
+                                            if (settings) {
+                                                updateSettings({
+                                                    ...settings,
+                                                    code_generation: {
+                                                        ...settings.code_generation,
+                                                        behavior_preset: 'project'
+                                                    }
+                                                });
+                                            }
+                                        }}
+                                        className={`flex items-center gap-1 px-1.5 py-1 rounded-md text-[10px] font-bold transition-all ${settings.code_generation.behavior_preset === 'project'
+                                            ? 'bg-blue-500/15 text-blue-400 shadow-sm'
+                                            : 'text-zinc-600 hover:text-zinc-400'
+                                            }`}
+                                        title="Свой код: Чистая разработка, стандарты 1С"
+                                    >
+                                        <User className="w-3 h-3" />
+                                        <span className="hidden sm:inline">СВОЙ</span>
+                                    </button>
+                                    <button
+                                        onClick={() => {
+                                            if (settings) {
+                                                updateSettings({
+                                                    ...settings,
+                                                    code_generation: {
+                                                        ...settings.code_generation,
+                                                        behavior_preset: 'maintenance'
+                                                    }
+                                                });
+                                            }
+                                        }}
+                                        className={`flex items-center gap-1 px-1.5 py-1 rounded-md text-[10px] font-bold transition-all ${settings.code_generation.behavior_preset === 'maintenance'
+                                            ? 'bg-orange-500/15 text-orange-400 shadow-sm'
+                                            : 'text-zinc-600 hover:text-zinc-400'
+                                            }`}
+                                        title="Чужой код: Изоляция правок, запрет рефакторинга"
+                                    >
+                                        <HardHat className="w-3 h-3" />
+                                        <span className="hidden sm:inline">ЧУЖОЙ</span>
+                                    </button>
+                                </div>
+                            )}
                         </div>
 
                         <button onClick={isLoading ? stopChat : handleSendMessage} disabled={!isLoading && !input.trim()} className={`p-2 rounded-lg transition-colors flex-shrink-0 ${isLoading ? 'bg-red-500/10 text-red-400' : input.trim() ? 'bg-blue-600 text-white' : 'bg-[#27272a] text-zinc-600'}`}>

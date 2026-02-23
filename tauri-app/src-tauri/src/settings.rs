@@ -8,8 +8,16 @@ use std::path::PathBuf;
 // Helper functions for defaults
 fn default_true() -> bool { true }
 
-fn default_change_marker() -> String {
-    "// [ИЗМЕНЕНО AI] - {date}".to_string()
+fn default_addition_marker() -> String {
+    "// Доработка START (Добавление) - {datetime}\n{newCode}\n// Доработка END".to_string()
+}
+
+fn default_modification_marker() -> String {
+    "// Доработка START (Изменение) - {datetime}\n{newCode}\n// Доработка END".to_string()
+}
+
+fn default_deletion_marker() -> String {
+    "// Доработка (Удаление) - {datetime}\n// {oldCode}".to_string()
 }
 
 /// Settings for 1C Configurator integration
@@ -148,6 +156,21 @@ pub enum CodeGenerationMode {
     Auto,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum PromptBehaviorPreset {
+    Project,
+    Maintenance,
+}
+
+impl Default for PromptBehaviorPreset {
+    fn default() -> Self {
+        Self::Project
+    }
+}
+
+// LabelingStyle больше не нужен, он зашит в пресет
+
 impl Default for CodeGenerationMode {
     fn default() -> Self {
         Self::Diff
@@ -160,51 +183,41 @@ pub struct CodeGenerationSettings {
     /// Режим генерации
     #[serde(default)]
     pub mode: CodeGenerationMode,
-    
-    /// Сохранять copyright-комментарии
-    #[serde(default = "default_true")]
-    pub preserve_copyright: bool,
+
+    /// Пресет поведения
+    #[serde(default)]
+    pub behavior_preset: PromptBehaviorPreset,
     
     /// Маркировать изменения
     #[serde(default = "default_true")]
     pub mark_changes: bool,
     
-    /// Шаблон маркера изменения
-    #[serde(default = "default_change_marker")]
-    pub change_marker_template: String,
+    /// Шаблон маркера для добавления (Maintenance)
+    #[serde(default = "default_addition_marker")]
+    pub addition_marker_template: String,
+
+    /// Шаблон маркера для изменения (Maintenance)
+    #[serde(default = "default_modification_marker")]
+    pub modification_marker_template: String,
+
+    /// Шаблон маркера для удаления (Maintenance)
+    #[serde(default = "default_deletion_marker")]
+    pub deletion_marker_template: String,
 }
 
 impl Default for CodeGenerationSettings {
     fn default() -> Self {
         Self {
-            mode: CodeGenerationMode::Full,
-            preserve_copyright: true,
+            mode: CodeGenerationMode::Diff,
+            behavior_preset: PromptBehaviorPreset::Project,
             mark_changes: true,
-            change_marker_template: default_change_marker(),
+            addition_marker_template: default_addition_marker(),
+            modification_marker_template: default_modification_marker(),
+            deletion_marker_template: default_deletion_marker(),
         }
     }
 }
 
-/// Настройки маркеров изменений
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ChangeMarkersSettings {
-    /// Добавлять маркер изменения
-    #[serde(default = "default_true")]
-    pub enabled: bool,
-    
-    /// Шаблон маркера (поддерживает {date}, {reason}, {author})
-    #[serde(default = "default_change_marker")]
-    pub template: String,
-}
-
-impl Default for ChangeMarkersSettings {
-    fn default() -> Self {
-        Self {
-            enabled: true,
-            template: default_change_marker(),
-        }
-    }
-}
 
 /// Шаблон промпта
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -232,10 +245,6 @@ pub struct CustomPromptsSettings {
     #[serde(default)]
     pub on_code_generate: String,
     
-    /// Шаблоны комментариев для изменений
-    #[serde(default)]
-    pub change_markers: ChangeMarkersSettings,
-    
     /// Пользовательские шаблоны промптов
     #[serde(default)]
     pub templates: Vec<PromptTemplate>,
@@ -247,7 +256,6 @@ impl Default for CustomPromptsSettings {
             system_prefix: String::new(),
             on_code_change: String::new(),
             on_code_generate: String::new(),
-            change_markers: ChangeMarkersSettings::default(),
             templates: vec![
                 PromptTemplate {
                     id: "bsl-standards".to_string(),
@@ -262,7 +270,7 @@ impl Default for CustomPromptsSettings {
                     description: "Оборачивать изменения в комментарии доработки".to_string(),
                     content: r#"Все изменения оборачивай в комментарии:
 // Доработка START
-// Дата: {date}
+// Дата: {datetime}
 <измененный код>
 // Доработка END"#.to_string(),
                     enabled: false,

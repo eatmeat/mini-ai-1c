@@ -181,10 +181,10 @@ export function SettingsPanel({ isOpen, onClose, initialTab }: SettingsPanelProp
                 <div className="flex border-b border-zinc-800 bg-zinc-900/50 overflow-x-auto scrollbar-hide no-scrollbar">
                     {[
                         { id: 'llm' as const, label: 'LLM Profiles', icon: Cpu },
-                        // { id: 'prompts' as const, label: 'Промпты', icon: MessageSquare },
                         { id: 'configurator' as const, label: 'Configurator', icon: Monitor },
                         { id: 'bsl' as const, label: 'BSL Server', icon: FileCode },
                         { id: 'mcp' as const, label: 'MCP Servers', icon: Database },
+                        { id: 'prompts' as const, label: 'Промпты', icon: MessageSquare },
                         { id: 'debug' as const, label: 'Debug', icon: Bug },
                     ].map((t) => (
                         <button
@@ -284,7 +284,7 @@ export function SettingsPanel({ isOpen, onClose, initialTab }: SettingsPanelProp
 
                 {/* Footer */}
                 <div className="p-4 border-t border-zinc-800 bg-zinc-900 flex justify-end gap-3 z-10 relative">
-                    {tab !== 'llm' && tab !== 'prompts' && (
+                    {tab !== 'llm' && (
                         <button
                             onClick={handleSaveSettings}
                             disabled={saving}

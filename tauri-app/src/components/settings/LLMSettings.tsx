@@ -382,7 +382,7 @@ export function LLMSettings({ profiles, onUpdate }: LLMSettingsProps) {
                             <button
                                 onClick={handleSave}
                                 disabled={isSaving}
-                                className={`w-full py-2 ${showSaved ? 'bg-green-600 hover:bg-green-500' : 'bg-blue-600 hover:bg-blue-500'} text-white rounded-md font-medium flex items-center justify-center gap-2 transition-colors disabled:opacity-50`}
+                                className={`w-full py-3 ${showSaved ? 'bg-green-600 hover:bg-green-500 shadow-green-900/20' : 'bg-blue-600 hover:bg-blue-500 shadow-blue-900/20'} text-white rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition-all disabled:opacity-50 active:scale-95 shadow-lg`}
                             >
                                 {isSaving ? (
                                     <>
@@ -397,7 +397,7 @@ export function LLMSettings({ profiles, onUpdate }: LLMSettingsProps) {
                                 ) : (
                                     <>
                                         <Save className="w-4 h-4" />
-                                        Save Profile
+                                        Save Settings
                                     </>
                                 )}
                             </button>

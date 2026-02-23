@@ -5,6 +5,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { Check, Server, Brain, Monitor, ArrowRight, Download, Terminal, Cloud, LogOut, ChevronRight, ChevronLeft, Bot, FileText, PanelRight } from 'lucide-react';
 import { LLMProfile } from '../../contexts/ProfileContext';
+import { AppSettings, DEFAULT_CUSTOM_PROMPTS, DEFAULT_CODE_GENERATION } from '../../types/settings';
 
 // --- Steps ---
 type Step = 'welcome' | 'environment' | 'llm-setup' | 'mcp-setup' | 'tour' | 'finish';
@@ -102,7 +103,11 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({ onComplete }
                     auto_download: true
                 },
                 mcp_servers: [],
-                onboarding_completed: false
+                onboarding_completed: false,
+                debug_mcp: false,
+                custom_prompts: DEFAULT_CUSTOM_PROMPTS,
+                code_generation: DEFAULT_CODE_GENERATION,
+                active_llm_profile: ""
             };
 
             // Автоматическая активация MCP серверов при завершении
@@ -146,11 +151,14 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({ onComplete }
                 }
             }
 
-            const newSettings = {
+            const newSettings: AppSettings = {
                 ...currentSettings,
                 onboarding_completed: true,
                 mcp_servers: updatedServers,
                 active_llm_profile: 'onboarding-profile',
+                debug_mcp: currentSettings.debug_mcp ?? false,
+                custom_prompts: currentSettings.custom_prompts ?? DEFAULT_CUSTOM_PROMPTS,
+                code_generation: currentSettings.code_generation ?? DEFAULT_CODE_GENERATION,
                 bsl_server: {
                     ...currentSettings.bsl_server,
                     enabled: bslEnvOk ? true : currentSettings.bsl_server.enabled,

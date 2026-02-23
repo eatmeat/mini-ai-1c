@@ -9,7 +9,7 @@ use tauri::Emitter;
 
 use crate::llm_profiles::{get_active_profile, LLMProvider};
 use crate::mcp_client::McpClient;
-use crate::settings::{load_settings, CodeGenerationMode};
+use crate::settings::{load_settings, PromptBehaviorPreset};
 use std::sync::Mutex;
 use lazy_static::lazy_static;
 
@@ -209,24 +209,20 @@ pub fn get_system_prompt(available_tools: &[ToolInfo]) -> String {
     
     let mut prompt = String::new();
     
-    // 1. Пользовательский префикс
-    // TEMPORARY DISABLED FOR RELEASE
-    if false /* !custom.system_prefix.is_empty() */ {
-        prompt.push_str(&custom.system_prefix);
-        prompt.push_str("\n\n");
+    // 1. Применяем пресет поведения (Behavior Preset)
+    match code_gen.behavior_preset {
+        PromptBehaviorPreset::Project => {
+            prompt.push_str("Ты - эксперт-разработчик 1С. Твоя задача - писать чистый, поддерживаемый код, следуя стандартам 1С и БСП. Можешь исправлять ошибки и предлагать оптимальные решения в рамках запроса.\n\n");
+        },
+        PromptBehaviorPreset::Maintenance => {
+            prompt.push_str("Ты - специалист по поддержке 1С. Твоя ГЛАВНАЯ задача - вносить точечные изменения в существующий (возможно, чужой или типовой) код. НИКОГДА не проводи рефакторинг и не меняй логику, которую не просили затронуть.\n\n");
+            prompt.push_str("КРИТИЧЕСКОЕ ПРАВИЛО: Все свои изменения (добавление, изменение или удаление кода) ты обязан изолировать комментариями. НИКОГДА не удаляй существующие комментарии и копирайты.\n\n");
+        },
     }
     
-    // 2. Базовый промпт - выбираем между Full и Diff режимом
-    // ВАЖНО: Auto пока работает как Diff для безопасности
-    let code_rules = match code_gen.mode {
-        CodeGenerationMode::Diff | CodeGenerationMode::Auto => {
-            // В Diff-режиме заменяем правила полного сохранения на diff-формат
-            DIFF_FORMAT_INSTRUCTIONS
-        }
-        CodeGenerationMode::Full => {
-            CODE_PRESERVATION_RULES
-        }
-    };
+    // 2. Базовый промпт - всегда используем DIFF_FORMAT_INSTRUCTIONS (SEARCH/REPLACE)
+    // согласно требованию максимального упрощения и надежности.
+    let code_rules = DIFF_FORMAT_INSTRUCTIONS;
     
     prompt.push_str(&format!(
         r#"Ты - AI-ассистент для разработки на платформе 1С:Предприятие.
@@ -256,39 +252,94 @@ pub fn get_system_prompt(available_tools: &[ToolInfo]) -> String {
         code_rules
     ));
 
-    // 3. Инструкции для изменения кода и маркировки
-    if code_gen.mark_changes {
-        let marker = code_gen.change_marker_template.replace("{date}", &format!("{}", chrono::Local::now().format("%Y-%m-%d")));
-        prompt.push_str("\n\n=== ПРАВИЛА МАРКИРОВКИ ИЗМЕНЕНИЙ ===\n");
-        prompt.push_str(&format!(
-            "При внесении изменений ОБЯЗАТЕЛЬНО добавляй комментарий в формате: {}\n",
-            marker
-        ));
+    // 3. Инструкции для маркировки (только если включено или в режиме Maintenance)
+    if code_gen.mark_changes || code_gen.behavior_preset == PromptBehaviorPreset::Maintenance {
+        let now = chrono::Local::now();
+        let date_str = now.format("%Y-%m-%d").to_string();
+        let datetime_str = now.format("%Y-%m-%d %H:%M:%S").to_string();
+        
+        let addition_marker = code_gen.addition_marker_template
+            .replace("{datetime}", &datetime_str)
+            .replace("{date}", &date_str);
+        let modification_marker = code_gen.modification_marker_template
+            .replace("{datetime}", &datetime_str)
+            .replace("{date}", &date_str);
+        let deletion_marker = code_gen.deletion_marker_template
+            .replace("{datetime}", &datetime_str)
+            .replace("{date}", &date_str);
+        
+        match code_gen.behavior_preset {
+            PromptBehaviorPreset::Maintenance => {
+                prompt.push_str("\n\n=== ПРАВИЛА ИЗОЛЯЦИИ ИЗМЕНЕНИЙ (MAINTENANCE) ===\n");
+                prompt.push_str("Ты обязан маркировать свои правки согласно стандартам 1С:\n");
+                prompt.push_str(&format!(
+                    "1. ДОБАВЛЕНИЕ НОВОГО КОДА: {}\n",
+                    if addition_marker.contains("{newCode}") {
+                        addition_marker.replace("{newCode}", "<твой новый код>")
+                    } else {
+                        format!("Оборачивай в:\n{}\n<твой код>\n// Доработка END", addition_marker)
+                    }
+                ));
+                prompt.push_str(&format!(
+                    "2. ИЗМЕНЕНИЕ СУЩЕСТВУЮЩЕГО КОДА: {}\n",
+                    if modification_marker.contains("{newCode}") {
+                        modification_marker.replace("{newCode}", "<твой новый исправленный код>")
+                    } else {
+                        format!("Оборачивай в:\n{}\n<твой код>\n// Доработка END", modification_marker)
+                    }
+                ));
+                if modification_marker.contains("{oldCode}") {
+                    prompt.push_str("ВАЖНО: В шаблоне изменения ты обязан заменить {oldCode} на исходный текст кода, который ты исправляешь или удаляешь.\n");
+                }
+                prompt.push_str(&format!(
+                    "3. УДАЛЕНИЕ КОДА: {}\n",
+                    if deletion_marker.contains("{oldCode}") {
+                        deletion_marker.replace("{oldCode}", "<закомментированный старый код>")
+                    } else {
+                        format!("{} (ниже следует закомментированный код)", deletion_marker)
+                    }
+                ));
+                if addition_marker.contains("{newCode}") || modification_marker.contains("{newCode}") {
+                    prompt.push_str("ВАЖНО: Если шаблон содержит {newCode}, ты ОБЯЗАН вставить свой код ровно на место этого токена.\n");
+                }
+                if deletion_marker.contains("{oldCode}") {
+                    prompt.push_str("ВАЖНО: Если шаблон удаления содержит {oldCode}, ты ОБЯЗАН заменить его на закомментированный текст удаляемого кода.\n");
+                }
+                prompt.push_str("НИКОГДА не удаляй код бесследно. Всегда изолируй изменения или комментируй удаляемое.\n");
+            },
+            PromptBehaviorPreset::Project => {
+                prompt.push_str("\n\n=== ПРАВИЛА МАРКИРОВКИ ИЗМЕНЕНИЙ ===\n");
+                prompt.push_str("При необходимости маркировки используй комментарий в конце измененных строк или отдельной строкой выше.\n");
+            }
+        }
     }
 
-    // TEMPORARY DISABLED FOR RELEASE
-    if false {
-        if !custom.on_code_change.is_empty() {
-            prompt.push_str("\n\n=== ПОЛЬЗОВАТЕЛЬСКИЕ ИНСТРУКЦИИ ДЛЯ ИЗМЕНЕНИЯ КОДА ===\n");
-            prompt.push_str(&custom.on_code_change);
-        }
-        
-        // 4. Инструкции для генерации нового кода
-        if !custom.on_code_generate.is_empty() {
-            prompt.push_str("\n\n=== ПОЛЬЗОВАТЕЛЬСКИЕ ИНСТРУКЦИИ ДЛЯ ГЕНЕРАЦИИ КОДА ===\n");
-            prompt.push_str(&custom.on_code_generate);
-        }
-        
-        // 5. Активные шаблоны
-        let active_templates: Vec<_> = custom.templates.iter()
-            .filter(|t| t.enabled)
-            .collect();
-        
-        if !active_templates.is_empty() {
-            prompt.push_str("\n\n=== АКТИВНЫЕ ШАБЛОНЫ ===\n");
-            for template in active_templates {
-                prompt.push_str(&format!("- {}\n{}\n", template.name, template.content));
-            }
+    // 4. Глобальный префикс (имеет высший приоритет, если задан)
+    if !custom.system_prefix.is_empty() {
+        prompt.push_str("\n\n=== ПОЛЬЗОВАТЕЛЬСКИЕ ГЛОБАЛЬНЫЕ НАСТРОЙКИ (OVERRIDE) ===\n");
+        prompt.push_str(&custom.system_prefix);
+    }
+
+    if !custom.on_code_change.is_empty() {
+        prompt.push_str("\n\n=== ПОЛЬЗОВАТЕЛЬСКИЕ ИНСТРУКЦИИ ДЛЯ ИЗМЕНЕНИЯ КОДА ===\n");
+        prompt.push_str(&custom.on_code_change);
+    }
+    
+    // 4. Инструкции для генерации нового кода
+    if !custom.on_code_generate.is_empty() {
+        prompt.push_str("\n\n=== ПОЛЬЗОВАТЕЛЬСКИЕ ИНСТРУКЦИИ ДЛЯ ГЕНЕРАЦИИ КОДА ===\n");
+        prompt.push_str(&custom.on_code_generate);
+    }
+    
+    // 5. Активные шаблоны
+    let active_templates: Vec<_> = custom.templates.iter()
+        .filter(|t| t.enabled)
+        .collect();
+    
+    if !active_templates.is_empty() {
+        prompt.push_str("\n\n=== АКТИВНЫЕ ШАБЛОНЫ ===\n");
+        for template in active_templates {
+            prompt.push_str(&format!("- {}\n{}\n", template.name, template.content));
         }
     }
     

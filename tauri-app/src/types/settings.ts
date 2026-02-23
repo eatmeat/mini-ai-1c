@@ -12,19 +12,21 @@ export interface BslStatus {
 // Режим генерации кода
 export type CodeGenerationMode = 'full' | 'diff' | 'auto';
 
+// Пресеты поведения промптов
+export type PromptBehaviorPreset = 'project' | 'maintenance';
+
+// Стиль маркировки больше не нужен как отдельный тип, он зашит в пресет
+
 // Настройки генерации кода
 export interface CodeGenerationSettings {
     mode: CodeGenerationMode;
-    preserve_copyright: boolean;
+    behavior_preset: PromptBehaviorPreset;
     mark_changes: boolean;
-    change_marker_template: string;
+    addition_marker_template: string;
+    modification_marker_template: string;
+    deletion_marker_template: string;
 }
 
-// Настройки маркеров изменений
-export interface ChangeMarkersSettings {
-    enabled: boolean;
-    template: string;
-}
 
 // Шаблон промпта
 export interface PromptTemplate {
@@ -40,8 +42,20 @@ export interface CustomPromptsSettings {
     system_prefix: string;
     on_code_change: string;
     on_code_generate: string;
-    change_markers: ChangeMarkersSettings;
     templates: PromptTemplate[];
+}
+
+export interface McpServerConfig {
+    id: string;
+    name: string;
+    enabled: boolean;
+    transport: 'http' | 'stdio' | 'internal';
+    url?: string | null;
+    login?: string | null;
+    password?: string | null;
+    command?: string | null;
+    args?: string[] | null;
+    env?: Record<string, string> | null;
 }
 
 export interface AppSettings {
@@ -56,17 +70,7 @@ export interface AppSettings {
         java_path: string;
         auto_download: boolean;
     };
-    mcp_servers: {
-        id: string;
-        name: string;
-        enabled: boolean;
-        transport: 'http' | 'stdio' | 'internal';
-        url?: string | null;
-        login?: string | null;
-        password?: string | null;
-        command?: string | null;
-        args?: string[] | null;
-    }[];
+    mcp_servers: McpServerConfig[];
     active_llm_profile: string;
     debug_mcp: boolean;
     onboarding_completed?: boolean;
@@ -82,16 +86,14 @@ export interface BslDiagnosticItem {
 }
 
 // Значения по умолчанию для новых настроек
-export const DEFAULT_CHANGE_MARKER_TEMPLATE = "// [ИЗМЕНЕНО AI] - {date}";
+export const DEFAULT_ADDITION_MARKER_TEMPLATE = "// Доработка START (Добавление) - {datetime}\n{newCode}\n// Доработка END";
+export const DEFAULT_MODIFICATION_MARKER_TEMPLATE = "// Доработка START (Изменение) - {datetime}\n{newCode}\n// Доработка END";
+export const DEFAULT_DELETION_MARKER_TEMPLATE = "// Доработка (Удаление) - {datetime}\n// {oldCode}";
 
 export const DEFAULT_CUSTOM_PROMPTS: CustomPromptsSettings = {
     system_prefix: "",
     on_code_change: "",
     on_code_generate: "",
-    change_markers: {
-        enabled: true,
-        template: DEFAULT_CHANGE_MARKER_TEMPLATE
-    },
     templates: [
         {
             id: "bsl-standards",
@@ -105,8 +107,7 @@ export const DEFAULT_CUSTOM_PROMPTS: CustomPromptsSettings = {
             name: "Оборачивать изменения",
             description: "Оборачивать изменения в комментарии доработки",
             content: `Все изменения оборачивай в комментарии:
-// Доработка START
-// Дата: {date}
+${DEFAULT_MODIFICATION_MARKER_TEMPLATE}
 <измененный код>
 // Доработка END`,
             enabled: false
@@ -115,8 +116,10 @@ export const DEFAULT_CUSTOM_PROMPTS: CustomPromptsSettings = {
 };
 
 export const DEFAULT_CODE_GENERATION: CodeGenerationSettings = {
-    mode: "full",
-    preserve_copyright: true,
+    mode: "diff",
+    behavior_preset: "project",
     mark_changes: true,
-    change_marker_template: DEFAULT_CHANGE_MARKER_TEMPLATE
+    addition_marker_template: DEFAULT_ADDITION_MARKER_TEMPLATE,
+    modification_marker_template: DEFAULT_MODIFICATION_MARKER_TEMPLATE,
+    deletion_marker_template: DEFAULT_DELETION_MARKER_TEMPLATE
 };

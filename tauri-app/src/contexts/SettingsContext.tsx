@@ -1,23 +1,7 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import * as api from '../api';
 
-export interface AppSettings {
-    configurator: {
-        window_title_pattern: string;
-        selected_window_hwnd: number | null;
-    };
-    bsl_server: {
-        jar_path: string;
-        websocket_port: number;
-        enabled: boolean;
-        java_path: string;
-        auto_download: boolean;
-    };
-    mcp_servers?: api.McpServerConfig[];
-    active_llm_profile?: string;
-    onboarding_completed?: boolean;
-    debug_mcp?: boolean;
-}
+import { AppSettings } from '../types/settings';
 
 interface SettingsContextType {
     settings: AppSettings | null;
