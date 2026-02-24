@@ -2,6 +2,7 @@
 //! Persists application settings to JSON file
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::fs;
 use std::path::PathBuf;
 
@@ -191,7 +192,7 @@ pub struct AppSettings {
     pub active_llm_profile: String,
     pub llm: LLMGlobalSettings,
     #[serde(default)]
-    pub debug_mcp: bool,
+    pub debug_mode: bool,
     #[serde(default)]
     pub onboarding_completed: bool,
     /// Настройки пользовательских промптов
@@ -379,8 +380,27 @@ pub fn load_settings() -> AppSettings {
         AppSettings::default()
     };
 
-    // Migration: Force high-performance node launcher for built-in MCP servers
     let mut modified = false;
+    
+    // Migration: debug_mcp -> debug_mode
+    let path = get_settings_file();
+    if path.exists() {
+        if let Ok(content) = fs::read_to_string(&path) {
+            if let Ok(Value::Object(map)) = serde_json::from_str::<Value>(&content) {
+                if let Some(old_val) = map.get("debug_mcp") {
+                    if !map.contains_key("debug_mode") {
+                        if let Some(b) = old_val.as_bool() {
+                            crate::app_log!("[SETTINGS] Migrating 'debug_mcp' ({}) to 'debug_mode'", b);
+                            settings.debug_mode = b;
+                            modified = true;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    // Migration: Force high-performance node launcher for built-in MCP servers
     for server in settings.mcp_servers.iter_mut() {
         if server.id == "builtin-1c-naparnik" || server.id == "builtin-1c-metadata" || server.id == "builtin-1c-help" {
             let current_cmd = server.command.as_deref().unwrap_or("");
@@ -438,6 +458,7 @@ pub fn load_settings() -> AppSettings {
         let _ = save_settings(&settings);
     }
 
+    crate::logger::set_debug_mode(settings.debug_mode);
     settings
 }
 
@@ -450,5 +471,6 @@ pub fn save_settings(settings: &AppSettings) -> Result<(), String> {
     let content = serde_json::to_string_pretty(settings)
         .map_err(|e| e.to_string())?;
     
+    crate::logger::set_debug_mode(settings.debug_mode);
     fs::write(path, content).map_err(|e| e.to_string())
 }

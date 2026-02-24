@@ -431,7 +431,7 @@ pub fn paste_code(hwnd: isize, code: &str, use_select_all: bool) -> Result<(), S
     set_clipboard(formats::Unicode, code)
         .map_err(|e| e.to_string())?;
 
-    println!("[Configurator] Clipboard updated, focusing window: {}", hwnd);
+    crate::app_log!("[Configurator] Clipboard updated, focusing window: {}", hwnd);
     
     unsafe {
         let window = HWND(hwnd as *mut std::ffi::c_void);
@@ -442,7 +442,7 @@ pub fn paste_code(hwnd: isize, code: &str, use_select_all: bool) -> Result<(), S
         if current_thread_id != target_thread_id {
             let res = AttachThreadInput(current_thread_id, target_thread_id, true);
             attached = res.as_bool();
-            println!("[Configurator] Attached to thread: {}", attached);
+            crate::app_log!("[Configurator] Attached to thread: {}", attached);
         }
         
         // Force window to foreground
@@ -451,7 +451,7 @@ pub fn paste_code(hwnd: isize, code: &str, use_select_all: bool) -> Result<(), S
         }
         
         let success = SetForegroundWindow(window);
-         println!("[Configurator] SetForegroundWindow result: {:?}", success);
+         crate::app_log!("[Configurator] SetForegroundWindow result: {:?}", success);
          
         if !success.as_bool() {
              // Try aggressive approach
@@ -466,7 +466,7 @@ pub fn paste_code(hwnd: isize, code: &str, use_select_all: bool) -> Result<(), S
         }
         
         std::thread::sleep(std::time::Duration::from_millis(100)); // Wait for focus
-        println!("[Configurator] Sending inputs...");
+        crate::app_log!("[Configurator] Sending inputs...");
 
         if use_select_all {
              send_ctrl_a();
@@ -506,7 +506,7 @@ pub fn paste_code(hwnd: isize, code: &str, use_select_all: bool) -> Result<(), S
         ];
         
         SendInput(&ctrl_v_inputs, std::mem::size_of::<INPUT>() as i32);
-        println!("[Configurator] Sent Ctrl+V inputs");
+        crate::app_log!("[Configurator] Sent Ctrl+V inputs");
         
         // Wait for paste to complete
         std::thread::sleep(std::time::Duration::from_millis(300));
@@ -514,7 +514,7 @@ pub fn paste_code(hwnd: isize, code: &str, use_select_all: bool) -> Result<(), S
         // Restore selection and scroll to top
         if use_select_all {
             // For full module: re-select all and scroll to top
-            println!("[Configurator] Re-selecting all and scrolling to top");
+            crate::app_log!("[Configurator] Re-selecting all and scrolling to top");
             send_ctrl_a();
             std::thread::sleep(std::time::Duration::from_millis(100));
             // Send Ctrl+Home to scroll to top (note: this might clear selection in some 1C versions, 
@@ -531,7 +531,7 @@ pub fn paste_code(hwnd: isize, code: &str, use_select_all: bool) -> Result<(), S
             // Since we re-select UPWARD, the cursor (and thus the view) should move to the beginning of the block.
             let line_count = code.lines().count();
             if line_count > 1 {
-                println!("[Configurator] Re-selecting {} lines and scrolling view", line_count - 1);
+                crate::app_log!("[Configurator] Re-selecting {} lines and scrolling view", line_count - 1);
                 send_shift_up(line_count - 1);
             }
         }
@@ -655,17 +655,17 @@ pub fn align_windows(configurator_hwnd: isize, ai_hwnd: isize) -> Result<(), Str
     let ai_window = HWND(ai_hwnd as *mut std::ffi::c_void);
 
     unsafe {
-        println!("[Configurator] Aligning windows (PIXEL-PERFECT V2): CONF={} AI={}", configurator_hwnd, ai_hwnd);
+        crate::app_log!("[Configurator] Aligning windows (PIXEL-PERFECT V2): CONF={} AI={}", configurator_hwnd, ai_hwnd);
 
         // 1. PHASE ONE: Preparation (Restore and wait)
         let mut needs_delay = false;
         if IsIconic(conf_window).as_bool() || IsZoomed(conf_window).as_bool() {
-            println!("[Configurator] Restoring Configurator");
+            crate::app_log!("[Configurator] Restoring Configurator");
             let _ = ShowWindow(conf_window, SW_RESTORE);
             needs_delay = true;
         }
         if IsIconic(ai_window).as_bool() || IsZoomed(ai_window).as_bool() {
-            println!("[Configurator] Restoring AI window");
+            crate::app_log!("[Configurator] Restoring AI window");
             let _ = ShowWindow(ai_window, SW_RESTORE);
             needs_delay = true;
         }
@@ -711,7 +711,7 @@ pub fn align_windows(configurator_hwnd: isize, ai_hwnd: isize) -> Result<(), Str
         let available_width = screen_width - (margin * 3);
         let conf_width = available_width - ai_width;
 
-        println!("[Configurator] Screen {}x{}, Target AI: {}, Conf: {}, Margin: {}", 
+        crate::app_log!("[Configurator] Screen {}x{}, Target AI: {}, Conf: {}, Margin: {}", 
             screen_width, screen_height, ai_width, conf_width, margin);
 
         // 3. PHASE THREE: Movement
@@ -722,7 +722,7 @@ pub fn align_windows(configurator_hwnd: isize, ai_hwnd: isize) -> Result<(), Str
         let conf_w = conf_width + c_l + c_r;
         let conf_h = screen_height - (margin * 2) + c_t + c_b;
         
-        println!("[Configurator] Move CONF: X={}, Y={}, W={}, H={}", conf_x, conf_y, conf_w, conf_h);
+        crate::app_log!("[Configurator] Move CONF: X={}, Y={}, W={}, H={}", conf_x, conf_y, conf_w, conf_h);
         let _ = MoveWindow(conf_window, conf_x, conf_y, conf_w, conf_h, true);
         
         // Move AI window to the right side with margin
@@ -732,7 +732,7 @@ pub fn align_windows(configurator_hwnd: isize, ai_hwnd: isize) -> Result<(), Str
         let ai_w = ai_width + a_l + a_r;
         let ai_h = screen_height - (margin * 2) + a_t + a_b;
 
-        println!("[Configurator] Move AI: X={}, Y={}, W={}, H={}", ai_x, ai_y, ai_w, ai_h);
+        crate::app_log!("[Configurator] Move AI: X={}, Y={}, W={}, H={}", ai_x, ai_y, ai_w, ai_h);
         let _ = MoveWindow(ai_window, ai_x, ai_y, ai_w, ai_h, true);
 
         // Final focus

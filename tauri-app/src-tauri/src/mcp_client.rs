@@ -114,7 +114,8 @@ impl McpManager {
             McpTransport::Http => Arc::new(McpSession::new_http(config.clone())),
             McpTransport::Stdio => {
                 let settings = crate::settings::load_settings();
-                Arc::new(McpSession::new_stdio(config.clone(), settings.debug_mcp).await?)
+                crate::logger::set_debug_mode(settings.debug_mode);
+                Arc::new(McpSession::new_stdio(config.clone(), settings.debug_mode).await?)
             }
         };
 
@@ -123,8 +124,9 @@ impl McpManager {
     }
 
     pub async fn reconfigure(new_settings: AppSettings, app_handle: &tauri::AppHandle) {
+        crate::logger::set_debug_mode(new_settings.debug_mode);
         crate::ai_client::clear_mcp_cache();
-        println!("Reconfiguring MCP servers...");
+        crate::app_log!("Reconfiguring MCP servers...");
         let mut sessions = MCP_MANAGER.sessions.lock().await;
 
         let new_server_ids: HashSet<String> = new_settings.mcp_servers.iter()
@@ -149,7 +151,7 @@ impl McpManager {
             };
 
             if needs_restart {
-                println!("Restarting/Starting MCP server: {}", config.name);
+                crate::app_log!("Restarting/Starting MCP server: {}", config.name);
                 // Remove old session if exists to ensure cleanup (drop will kill child)
                 sessions.remove(&config.id);
 
@@ -162,14 +164,14 @@ impl McpManager {
                     continue;
                 }
 
-                match McpSession::new_stdio(config.clone(), new_settings.debug_mcp).await {
+                match McpSession::new_stdio(config.clone(), new_settings.debug_mode).await {
                     Ok(session) => {
                         let session = Arc::new(session);
-                        println!("Started MCP server: {}", config.id);
+                        crate::app_log!("Started MCP server: {}", config.id);
                         sessions.insert(config.id.clone(), (config, session));
                     }
                     Err(e) => {
-                        eprintln!("Failed to start MCP server {}: {}", config.name, e);
+                        crate::app_log!(force: true, "Failed to start MCP server {}: {}", config.name, e);
                     }
                 }
             }
@@ -238,7 +240,7 @@ impl McpManager {
                  "stopped" // Enabled but not in sessions (failed to start or never started)
              };
 
-             println!("[DEBUG] MCP Server status for {}: {}", config.id, status);
+             crate::app_log!("[DEBUG] MCP Server status for {}: {}", config.id, status);
              
              // Извлекаем прогресс индексации для 1С:Справка
              let (index_progress, index_message, help_status_str) = if config.id == "builtin-1c-help" {
@@ -300,11 +302,11 @@ pub fn start_settings_watcher(app_handle: tauri::AppHandle) {
         let config_dir = crate::settings::get_settings_dir();
 
         if let Err(e) = watcher.watch(&config_dir, RecursiveMode::NonRecursive) {
-             eprintln!("Failed to watch settings dir: {}", e);
+             crate::app_log!(force: true, "Failed to watch settings dir: {}", e);
              return;
         }
 
-        println!("Started watching settings at {:?}", config_dir);
+        crate::app_log!("Started watching settings at {:?}", config_dir);
 
         for res in rx {
             match res {
@@ -327,7 +329,7 @@ pub fn start_settings_watcher(app_handle: tauri::AppHandle) {
                         });
                     }
                 },
-                Err(e) => eprintln!("Watch error: {:?}", e),
+                Err(e) => crate::app_log!(force: true, "Watch error: {:?}", e),
             }
         }
     });

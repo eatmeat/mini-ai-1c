@@ -437,7 +437,7 @@ pub fn get_system_prompt(available_tools: &[ToolInfo], messages: &[ApiMessage]) 
         }
     }
 
-    println!("[DEBUG][PROMPT] Final System Prompt:\n{}", prompt);
+    crate::app_log!("[DEBUG][PROMPT] Final System Prompt:\n{}", prompt);
     prompt
 }
 
@@ -447,7 +447,7 @@ pub async fn get_available_tools() -> Vec<ToolInfo> {
     let mut all_tools = Vec::new();
     let mut seen_names = std::collections::HashSet::new();
 
-    println!("[MCP][TOOLS] Collecting tools...");
+    crate::app_log!("[MCP][TOOLS] Collecting tools...");
     
     // Check cache first
     {
@@ -485,7 +485,7 @@ pub async fn get_available_tools() -> Vec<ToolInfo> {
             let server_name = config.name.clone();
             let server_id = config.id.clone();
             let start = std::time::Instant::now();
-            println!("[MCP][TOOLS] Connecting to server: {} (ID: {})", server_name, server_id);
+            crate::app_log!("[MCP][TOOLS] Connecting to server: {} (ID: {})", server_name, server_id);
             
             match McpClient::new(config).await {
                 Ok(client) => {
@@ -579,7 +579,7 @@ pub async fn get_available_tools() -> Vec<ToolInfo> {
 pub fn clear_mcp_cache() {
     if let Ok(mut cache) = TOOLS_CACHE.lock() {
         *cache = None;
-        println!("[MCP][CACHE] Cache cleared.");
+        crate::app_log!("[MCP][CACHE] Cache cleared.");
     }
 }
 

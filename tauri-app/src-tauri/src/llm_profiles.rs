@@ -125,13 +125,13 @@ pub fn load_profiles() -> ProfileStore {
                         store
                     }
                     Err(e) => {
-                        eprintln!("[LLM Profiles] Failed to parse profiles file: {}. Creating defaults.", e);
+                        crate::app_log!(force: true, "[LLM Profiles] Failed to parse profiles file: {}. Creating defaults.", e);
                         create_default_store()
                     }
                 }
             }
             Err(e) => {
-                eprintln!("[LLM Profiles] Failed to read profiles file: {}. Creating defaults.", e);
+                crate::app_log!(force: true, "[LLM Profiles] Failed to read profiles file: {}. Creating defaults.", e);
                 create_default_store()
             }
         }

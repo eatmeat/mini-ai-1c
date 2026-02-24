@@ -73,7 +73,7 @@ pub async fn fetch_models_from_api(_provider_id: &str, base_url: &str, api_key: 
     }
 
     let body = resp.text().await.map_err(|e| e.to_string())?;
-    println!("Raw API response for provider: {}", body);
+    crate::app_log!("[LLM] Raw API response for provider: {}", body);
     
     let completion: OpenAiResponse = serde_json::from_str(&body).map_err(|e| e.to_string())?;
 
@@ -107,7 +107,7 @@ pub async fn fetch_registry() -> Result<RegistryData, String> {
 
 /// Merges API models with Registry metadata
 pub fn merge_models(api_models: Vec<Model>, registry: &RegistryData, provider_id: &str) -> Vec<Model> {
-    println!("Merging models for provider_id: '{}'. Registry size: {} providers", provider_id, registry.providers.len());
+    crate::app_log!("[LLM] Merging models for provider_id: '{}'. Registry size: {} providers", provider_id, registry.providers.len());
     
     api_models.into_iter().map(|mut model| {
         let initial_cw = model.context_window;
@@ -130,7 +130,7 @@ pub fn merge_models(api_models: Vec<Model>, registry: &RegistryData, provider_id
                     enrich_model(&mut model, reg_model);
                     let _ = true; // flag was found_in_registry
                     source = "registry_global";
-                    println!("  Model '{}' found in global registry under '{}'", model.id, p_id);
+                    crate::app_log!("  Model '{}' found in global registry under '{}'", model.id, p_id);
                     break;
                 }
             }
@@ -170,7 +170,7 @@ pub fn merge_models(api_models: Vec<Model>, registry: &RegistryData, provider_id
         }
 
         if initial_cw != model.context_window {
-            println!("  Model updated: '{}' | {} -> {} (Source: {})", model.id, initial_cw, model.context_window, source);
+            crate::app_log!("  Model updated: '{}' | {} -> {} (Source: {})", model.id, initial_cw, model.context_window, source);
         }
 
         model

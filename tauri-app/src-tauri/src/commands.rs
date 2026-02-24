@@ -268,7 +268,7 @@ pub async fn stream_chat(
                 
                 if !approved {
                     let _ = task_app_handle.emit("chat-status", "Действие отклонено пользователем");
-                    println!("[AI][LOOP] Tool calls rejected by user");
+                    crate::app_log!("[AI][LOOP] Tool calls rejected by user");
                     
                     for tool_call in tool_calls {
                          api_messages.push(ApiMessage {
@@ -283,7 +283,7 @@ pub async fn stream_chat(
                 }
 
                 let _ = task_app_handle.emit("chat-status", "Вызов MCP...");
-                println!("[AI][LOOP] Processing {} tool calls (Approved)", tool_calls.len());
+                crate::app_log!("[AI][LOOP] Processing {} tool calls (Approved)", tool_calls.len());
 
                 for tool_call in tool_calls {
                     let tool_name = &tool_call.function.name;
@@ -292,7 +292,7 @@ pub async fn stream_chat(
                     let arguments: serde_json::Value = serde_json::from_str(&tool_call.function.arguments)
                         .unwrap_or(serde_json::json!({}));
                     
-                    println!("[AI][TOOL] Executing: {} with args: {}", tool_name, arguments);
+                    crate::app_log!("[AI][TOOL] Executing: {} with args: {}", tool_name, arguments);
 
                     let mut tool_result = "Error: Tool not found".to_string();
                     let mut _found = false;
@@ -785,7 +785,7 @@ pub async fn fetch_models_from_provider(
     // 2. Fetch Registry
     let registry = providers::fetch_registry().await
         .unwrap_or_else(|e| {
-             println!("Failed to fetch registry: {}", e);
+             crate::app_log!(force: true, "Failed to fetch registry: {}", e);
              providers::RegistryData { providers: std::collections::HashMap::new() }
         });
 
@@ -822,7 +822,7 @@ pub async fn fetch_models_for_profile(profile_id: String) -> Result<Vec<crate::l
     // 2. Fetch Registry
     let registry = providers::fetch_registry().await
         .unwrap_or_else(|e| {
-             println!("Failed to fetch registry: {}", e);
+             crate::app_log!(force: true, "Failed to fetch registry: {}", e);
              providers::RegistryData { providers: std::collections::HashMap::new() }
         });
 
@@ -847,7 +847,7 @@ pub async fn check_bsl_status_cmd(
     state: tauri::State<'_, Arc<tokio::sync::Mutex<crate::bsl_client::BSLClient>>>
 ) -> Result<BslStatus, String> {
     use crate::bsl_client::BSLClient;
-    println!("[DEBUG] check_bsl_status_cmd called");
+    crate::app_log!("[DEBUG] check_bsl_status_cmd called");
     let settings = settings::load_settings();
     
     let installed = BSLClient::check_install(&settings.bsl_server.jar_path);
@@ -857,7 +857,7 @@ pub async fn check_bsl_status_cmd(
     let connected = if let Ok(client) = state.inner().try_lock() {
         client.is_connected()
     } else {
-        println!("[DEBUG] check_bsl_status_cmd: state is locked, returning connected=false");
+        crate::app_log!("[DEBUG] check_bsl_status_cmd: state is locked, returning connected=false");
         false
     };
     
@@ -866,7 +866,7 @@ pub async fn check_bsl_status_cmd(
         java_info,
         connected,
     };
-    println!("[DEBUG] check_bsl_status_cmd result: {:?}", status);
+    crate::app_log!("[DEBUG] check_bsl_status_cmd result: {:?}", status);
     Ok(status)
 }
 

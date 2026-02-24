@@ -32,7 +32,7 @@ struct DownloadProgress {
 /// Download BSL Language Server from GitHub
 /// Returns the absolute path to the downloaded JAR file
 pub async fn download_bsl_ls(app: AppHandle) -> Result<String, String> {
-    println!("[BSL Installer] Starting download...");
+    crate::app_log!("[BSL Installer] Starting download...");
     
     // Emit initial progress
     let _ = app.emit("bsl-download-progress", DownloadProgress { progress: 0, total: 0, percent: 0 });
@@ -45,7 +45,7 @@ pub async fn download_bsl_ls(app: AppHandle) -> Result<String, String> {
         .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
     
     // 1. Get latest release info from GitHub API
-    println!("[BSL Installer] Fetching latest release info...");
+    crate::app_log!("[BSL Installer] Fetching latest release info...");
     let release: GitHubRelease = client
         .get("https://api.github.com/repos/1c-syntax/bsl-language-server/releases/latest")
         .header("User-Agent", "mini-ai-1c")
@@ -56,7 +56,7 @@ pub async fn download_bsl_ls(app: AppHandle) -> Result<String, String> {
         .await
         .map_err(|e| format!("Failed to parse release info: {}", e))?;
 
-    println!("[BSL Installer] Found release: {}", release.tag_name);
+    crate::app_log!("[BSL Installer] Found release: {}", release.tag_name);
 
     // 2. Find the exec jar asset
     let asset = release.assets.iter()
@@ -64,7 +64,7 @@ pub async fn download_bsl_ls(app: AppHandle) -> Result<String, String> {
         .ok_or("Could not find *-exec.jar in the latest release")?;
 
     let total_size = asset.size;
-    println!("[BSL Installer] Asset: {} ({} bytes)", asset.name, total_size);
+    crate::app_log!("[BSL Installer] Asset: {} ({} bytes)", asset.name, total_size);
 
     // 3. Determine install path (absolute path in app data dir)
     let bin_dir = get_settings_dir().join("bin");
@@ -75,10 +75,10 @@ pub async fn download_bsl_ls(app: AppHandle) -> Result<String, String> {
     }
     
     let target_path = bin_dir.join(&asset.name);
-    println!("[BSL Installer] Target path: {}", target_path.display());
+    crate::app_log!("[BSL Installer] Target path: {}", target_path.display());
 
     // 4. Download file with progress
-    println!("[BSL Installer] Downloading...");
+    crate::app_log!("[BSL Installer] Downloading...");
     let response = client
         .get(&asset.browser_download_url)
         .header("User-Agent", "mini-ai-1c")
@@ -112,7 +112,7 @@ pub async fn download_bsl_ls(app: AppHandle) -> Result<String, String> {
         
         // Emit progress every 5%
         if percent >= last_percent + 5 {
-            println!("[BSL Installer] Progress: {}%", percent);
+            crate::app_log!("[BSL Installer] Progress: {}%", percent);
             let _ = app.emit("bsl-download-progress", DownloadProgress {
                 progress: downloaded,
                 total: total_size,
@@ -131,7 +131,7 @@ pub async fn download_bsl_ls(app: AppHandle) -> Result<String, String> {
         percent: 100,
     });
 
-    println!("[BSL Installer] Download complete!");
+    crate::app_log!("[BSL Installer] Download complete!");
 
     // 6. Get absolute path
     let abs_path = tokio::fs::canonicalize(&target_path)
@@ -150,7 +150,7 @@ pub async fn download_bsl_ls(app: AppHandle) -> Result<String, String> {
     settings.bsl_server.jar_path = path_str.clone();
     save_settings(&settings).map_err(|e| format!("Failed to save settings: {}", e))?;
 
-    println!("[BSL Installer] Saved to settings: {}", path_str);
+    crate::app_log!("[BSL Installer] Saved to settings: {}", path_str);
 
     Ok(path_str)
 }

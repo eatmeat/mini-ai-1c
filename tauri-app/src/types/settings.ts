@@ -82,7 +82,7 @@ export interface AppSettings {
     };
     mcp_servers: McpServerConfig[];
     active_llm_profile: string;
-    debug_mcp: boolean;
+    debug_mode: boolean;
     onboarding_completed?: boolean;
     custom_prompts: CustomPromptsSettings;
     code_generation: CodeGenerationSettings;

@@ -112,14 +112,14 @@ pub fn run() {
                 let mut client = client_inner.lock().await;
                 
                 if let Err(e) = client.start_server() {
-                    eprintln!("Failed to start BSL LS: {}", e);
+                    crate::app_log!(force: true, "Failed to start BSL LS: {}", e);
                 } else {
-                    println!("BSL LS started");
+                    crate::app_log!("BSL LS started");
                     // Try to connect immediately
                     if let Err(e) = client.connect().await {
-                         eprintln!("Failed to connect to BSL LS: {}", e);
+                         crate::app_log!(force: true, "Failed to connect to BSL LS: {}", e);
                     } else {
-                         println!("BSL LS connected");
+                         crate::app_log!("BSL LS connected");
                     }
                 }
             });

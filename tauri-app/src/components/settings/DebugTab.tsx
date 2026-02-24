@@ -25,7 +25,7 @@ export function DebugTab({
                 <section>
                     <h3 className="text-lg font-medium mb-4 flex items-center gap-2 text-zinc-100">
                         <Bug className="w-5 h-5 text-red-500" />
-                        Advanced Debugging
+                        Advanced Debugging & Logs
                     </h3>
                     <div className="bg-zinc-800/50 border border-zinc-700 rounded-xl p-5 space-y-4">
                         <div className="flex items-center justify-between">
@@ -69,13 +69,13 @@ export function DebugTab({
 
                         <div className="flex items-center justify-between pt-4 border-t border-zinc-700">
                             <div>
-                                <div className="font-medium text-zinc-200 text-sm">MCP Verbose Logging</div>
-                                <div className="text-xs text-zinc-500">Log all SSE events and tool payloads to terminal. Can impact performance.</div>
+                                <div className="font-medium text-zinc-200 text-sm">Debug Mode</div>
+                                <div className="text-xs text-zinc-500">Подробное журналирование работы приложения и MCP-серверов в терминал.</div>
                             </div>
-                            <div className="relative inline-flex h-6 w-11 items-center rounded-full bg-zinc-700 cursor-pointer transition-colors"
-                                onClick={() => setSettings({ ...settings, debug_mcp: !settings.debug_mcp })}
+                            <div className={`relative inline-flex h-6 w-11 items-center rounded-full cursor-pointer transition-all duration-200 ${settings.debug_mode ? 'bg-blue-600 shadow-[0_0_10px_rgba(37,99,235,0.4)]' : 'bg-zinc-700'}`}
+                                onClick={() => setSettings({ ...settings, debug_mode: !settings.debug_mode })}
                             >
-                                <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${settings.debug_mcp ? 'translate-x-6 bg-blue-500' : 'translate-x-1'}`} />
+                                <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow-sm transition-transform duration-200 ${settings.debug_mode ? 'translate-x-6' : 'translate-x-1'}`} />
                             </div>
                         </div>
 

@@ -636,7 +636,7 @@ impl BSLClient {
                     }
                 }
                 _ = &mut timeout => {
-                    println!("[BSL LS] Timeout waiting for diagnostics");
+                    crate::app_log!("[BSL LS] Timeout waiting for diagnostics");
                     // Close document even on timeout (manual send)
                     let close_req = JsonRpcRequest {
                         jsonrpc: "2.0".to_string(),

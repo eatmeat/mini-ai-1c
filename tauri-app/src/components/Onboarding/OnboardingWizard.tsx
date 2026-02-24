@@ -104,7 +104,7 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({ onComplete }
                 },
                 mcp_servers: [],
                 onboarding_completed: false,
-                debug_mcp: false,
+                debug_mode: false,
                 custom_prompts: DEFAULT_CUSTOM_PROMPTS,
                 code_generation: DEFAULT_CODE_GENERATION,
                 active_llm_profile: "",
@@ -157,7 +157,7 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({ onComplete }
                 onboarding_completed: true,
                 mcp_servers: updatedServers,
                 active_llm_profile: 'onboarding-profile',
-                debug_mcp: currentSettings.debug_mcp ?? false,
+                debug_mode: currentSettings.debug_mode ?? false,
                 custom_prompts: currentSettings.custom_prompts ?? DEFAULT_CUSTOM_PROMPTS,
                 code_generation: currentSettings.code_generation ?? DEFAULT_CODE_GENERATION,
                 bsl_server: {
