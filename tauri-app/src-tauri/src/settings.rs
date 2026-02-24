@@ -20,6 +20,86 @@ fn default_deletion_marker() -> String {
     "// Доработка (Удаление) - {datetime}\n// {oldCode}".to_string()
 }
 
+/// Быстрые команды (Slash Commands)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SlashCommand {
+    pub id: String,
+    pub command: String,
+    pub name: String,
+    pub description: String,
+    pub template: String,
+    pub is_enabled: bool,
+    pub is_system: bool,
+}
+
+fn default_slash_commands() -> Vec<SlashCommand> {
+    vec![
+        SlashCommand {
+            id: "fix".to_string(),
+            command: "исправить".to_string(),
+            name: "Исправить".to_string(),
+            description: "Исправить ошибки BSL и логические ошибки".to_string(),
+            template: "Исправь ошибки в этом коде. Обрати внимание на следующие диагностики:\n{diagnostics}\n\nКод для исправления:\n```bsl\n{code}\n```".to_string(),
+            is_enabled: true,
+            is_system: true,
+        },
+        SlashCommand {
+            id: "refactor".to_string(),
+            command: "рефакторинг".to_string(),
+            name: "Рефакторинг".to_string(),
+            description: "Улучшить структуру и читаемость кода".to_string(),
+            template: "Проведи рефакторинг этого кода, улучши его структуру и читаемость, соблюдая стандарты 1С:\n```bsl\n{code}\n```".to_string(),
+            is_enabled: true,
+            is_system: true,
+        },
+        SlashCommand {
+            id: "desc".to_string(),
+            command: "описание".to_string(),
+            name: "Описание".to_string(),
+            description: "Сгенерировать описание процедуры/функции".to_string(),
+            template: "Сгенерируй стандартную шапку описания для этой процедуры/функции:\n```bsl\n{code}\n```".to_string(),
+            is_enabled: true,
+            is_system: true,
+        },
+        SlashCommand {
+            id: "explain".to_string(),
+            command: "объясни".to_string(),
+            name: "Объясни".to_string(),
+            description: "Подробно объяснить работу кода".to_string(),
+            template: "Подробно объясни, как работает этот фрагмент кода:\n```bsl\n{code}\n```".to_string(),
+            is_enabled: true,
+            is_system: true,
+        },
+        SlashCommand {
+            id: "review".to_string(),
+            command: "ревью".to_string(),
+            name: "Ревью".to_string(),
+            description: "Провести код-ревью".to_string(),
+            template: "Проведи подробное код-ревью этого фрагмента. Найди потенциальные баги, узкие места и предложи улучшения:\n```bsl\n{code}\n```".to_string(),
+            is_enabled: true,
+            is_system: true,
+        },
+        SlashCommand {
+            id: "standards".to_string(),
+            command: "стандарты".to_string(),
+            name: "Стандарты".to_string(),
+            description: "Проверить на соответствие стандартам 1С".to_string(),
+            template: "Проверь этот код на соответствие официальным стандартам разработки 1С и БСП:\n```bsl\n{code}\n```".to_string(),
+            is_enabled: true,
+            is_system: true,
+        },
+        SlashCommand {
+            id: "its".to_string(),
+            command: "итс".to_string(),
+            name: "1С:ИТС".to_string(),
+            description: "Поиск информации в ИТС через Напарника".to_string(),
+            template: "Используй инструменты MCP сервера \"Напарник\" (1C:Naparnik), чтобы найти ответ на мой вопрос в информационной системе 1С:ИТС. Мой вопрос: {query}".to_string(),
+            is_enabled: true,
+            is_system: true,
+        },
+    ]
+}
+
 /// Settings for 1C Configurator integration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConfiguratorSettings {
@@ -120,6 +200,9 @@ pub struct AppSettings {
     /// Настройки генерации кода
     #[serde(default)]
     pub code_generation: CodeGenerationSettings,
+    /// Быстрые команды
+    #[serde(default = "default_slash_commands")]
+    pub slash_commands: Vec<SlashCommand>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -342,6 +425,12 @@ pub fn load_settings() -> AppSettings {
     if settings.code_generation.mode == CodeGenerationMode::Full {
         crate::app_log!("[SETTINGS] Migrating deprecated 'Full' mode to 'Diff'");
         settings.code_generation.mode = CodeGenerationMode::Diff;
+        modified = true;
+    }
+
+    // Migration: ensure default slash commands exist
+    if settings.slash_commands.is_empty() {
+        settings.slash_commands = default_slash_commands();
         modified = true;
     }
 

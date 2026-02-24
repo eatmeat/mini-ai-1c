@@ -20,6 +20,7 @@ export interface ChatMessage {
     id: string;
     role: 'user' | 'assistant' | 'tool';
     content: string;
+    displayContent?: string;
     thinking?: string;
     toolCalls?: ToolCall[];
     diagnostics?: BSLDiagnostic[];
@@ -34,10 +35,10 @@ interface ChatContextType {
     isLoading: boolean;
     chatStatus: string;
     currentIteration: number;
-    sendMessage: (content: string, codeContext?: string, diagnostics?: string[]) => Promise<void>;
+    sendMessage: (content: string, codeContext?: string, diagnostics?: string[], displayContent?: string) => Promise<void>;
     stopChat: () => Promise<void>;
     clearChat: () => void;
-    editAndRerun: (messageIndex: number, newContent: string, codeContext?: string, diagnostics?: string[]) => Promise<void>;
+    editAndRerun: (messageIndex: number, newContent: string, codeContext?: string, diagnostics?: string[], displayContent?: string) => Promise<void>;
 }
 
 const ChatContext = createContext<ChatContextType | undefined>(undefined);
@@ -175,11 +176,17 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
         };
     }, []);
 
-    const sendMessage = useCallback(async (content: string, codeContext?: string, diagnostics?: string[]) => {
+    const sendMessage = useCallback(async (content: string, codeContext?: string, diagnostics?: string[], displayContent?: string) => {
         if (!content.trim() || isLoading) return;
 
-        // 1. UI: Show clean user message
-        const userMessage: ChatMessage = { id: generateId(), role: 'user', content, timestamp: Date.now() };
+        // 1. UI: Show clean user message (original slash command if available)
+        const userMessage: ChatMessage = {
+            id: generateId(),
+            role: 'user',
+            content,
+            displayContent,
+            timestamp: Date.now()
+        };
         setMessages(prev => [...prev, userMessage]);
         setIsLoading(true);
 
@@ -224,7 +231,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     }, []);
 
     // Edit message and rerun from that point
-    const editAndRerun = useCallback(async (messageIndex: number, newContent: string, codeContext?: string, diagnostics?: string[]) => {
+    const editAndRerun = useCallback(async (messageIndex: number, newContent: string, codeContext?: string, diagnostics?: string[], displayContent?: string) => {
         if (!newContent.trim() || isLoading) return;
 
         // 1. Truncate messages to the edited message
@@ -234,6 +241,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
         const editedMessage: ChatMessage = {
             ...messages[messageIndex],
             content: newContent,
+            displayContent,
             timestamp: Date.now()
         };
 

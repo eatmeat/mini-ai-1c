@@ -58,6 +58,16 @@ export interface McpServerConfig {
     env?: Record<string, string> | null;
 }
 
+export interface SlashCommand {
+    id: string;
+    command: string;
+    name: string;
+    description: string;
+    template: string;
+    is_enabled: boolean;
+    is_system: boolean;
+}
+
 export interface AppSettings {
     configurator: {
         window_title_pattern: string;
@@ -76,6 +86,7 @@ export interface AppSettings {
     onboarding_completed?: boolean;
     custom_prompts: CustomPromptsSettings;
     code_generation: CodeGenerationSettings;
+    slash_commands: SlashCommand[];
 }
 
 export interface BslDiagnosticItem {
@@ -89,6 +100,72 @@ export interface BslDiagnosticItem {
 export const DEFAULT_ADDITION_MARKER_TEMPLATE = "// Доработка START (Добавление) - {datetime}\n{newCode}\n// Доработка END";
 export const DEFAULT_MODIFICATION_MARKER_TEMPLATE = "// Доработка START (Изменение) - {datetime}\n{newCode}\n// Доработка END";
 export const DEFAULT_DELETION_MARKER_TEMPLATE = "// Доработка (Удаление) - {datetime}\n// {oldCode}";
+
+export const DEFAULT_SLASH_COMMANDS: SlashCommand[] = [
+    {
+        id: 'fix',
+        command: 'исправить',
+        name: 'Исправить',
+        description: 'Исправить ошибки BSL и логические ошибки',
+        template: 'Исправь ошибки в этом коде. Обрати внимание на следующие диагностики:\n{diagnostics}\n\nКод для исправления:\n```bsl\n{code}\n```',
+        is_enabled: true,
+        is_system: true
+    },
+    {
+        id: 'refactor',
+        command: 'рефакторинг',
+        name: 'Рефакторинг',
+        description: 'Улучшить структуру и читаемость кода',
+        template: 'Проведи рефакторинг этого кода, улучши его структуру и читаемость, соблюдая стандарты 1С:\n```bsl\n{code}\n```',
+        is_enabled: true,
+        is_system: true
+    },
+    {
+        id: 'desc',
+        command: 'описание',
+        name: 'Описание',
+        description: 'Сгенерировать описание процедуры/функции',
+        template: 'Сгенерируй стандартную шапку описания для этой процедуры/функции:\n```bsl\n{code}\n```',
+        is_enabled: true,
+        is_system: true
+    },
+    {
+        id: 'explain',
+        command: 'объясни',
+        name: 'Объясни',
+        description: 'Подробно объяснить работу кода',
+        template: 'Подробно объясни, как работает этот фрагмент кода:\n```bsl\n{code}\n```',
+        is_enabled: true,
+        is_system: true
+    },
+    {
+        id: 'review',
+        command: 'ревью',
+        name: 'Ревью',
+        description: 'Провести код-ревью',
+        template: 'Проведи подробное код-ревью этого фрагмента. Найди потенциальные баги, узкие места и предложи улучшения:\n```bsl\n{code}\n```',
+        is_enabled: true,
+        is_system: true
+    },
+    {
+        id: 'standards',
+        command: 'стандарты',
+        name: 'Стандарты',
+        description: 'Проверить на соответствие стандартам 1С',
+        template: 'Проверь этот код на соответствие официальным стандартам разработки 1С и БСП:\n```bsl\n{code}\n```',
+        is_enabled: true,
+        is_system: true
+    },
+    {
+        id: 'its',
+        command: 'итс',
+        name: '1С:ИТС',
+        description: 'Поиск информации в ИТС через Напарника',
+        template: 'Используй инструменты MCP сервера "Напарник" (1C:Naparnik), чтобы найти ответ на мой вопрос в информационной системе 1С:ИТС. Мой вопрос: {query}',
+        is_enabled: true,
+        is_system: true
+    }
+];
 
 export const DEFAULT_CUSTOM_PROMPTS: CustomPromptsSettings = {
     system_prefix: "",

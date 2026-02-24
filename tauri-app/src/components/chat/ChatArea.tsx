@@ -12,6 +12,8 @@ import ToolCallBlock from './ToolCallBlock';
 import { MessageActions } from './MessageActions';
 import { applyDiff, hasDiffBlocks, extractDisplayCode, stripCodeBlocks, parseDiffBlocks, hasApplicableDiffBlocks } from '../../utils/diffViewer';
 import { FileDiff, Plus, Minus, Edit2, PanelRight } from 'lucide-react';
+import { CommandMenu } from './CommandMenu';
+import { DEFAULT_SLASH_COMMANDS, SlashCommand } from '../../types/settings';
 
 interface ChatAreaProps {
     originalCode?: string;
@@ -103,6 +105,23 @@ export function ChatArea({
     const [editText, setEditText] = useState('');
     const [showVoiceHint, setShowVoiceHint] = useState(false);
 
+    // Slash Commands state
+    const [showCommands, setShowCommands] = useState(false);
+    const [commandFilter, setCommandFilter] = useState('');
+    const availableCommands = useMemo(() => {
+        const cmds = settings?.slash_commands || DEFAULT_SLASH_COMMANDS;
+        return cmds.filter(c => c.is_enabled);
+    }, [settings?.slash_commands]);
+
+    const filteredCommands = useMemo(() => {
+        if (!commandFilter) return availableCommands;
+        const filter = commandFilter.toLowerCase();
+        return availableCommands.filter(c =>
+            c.command.toLowerCase().includes(filter) ||
+            c.name.toLowerCase().includes(filter)
+        );
+    }, [availableCommands, commandFilter]);
+
     const { isRecording, toggleRecording, isSupported, error: voiceError, permissionState } = useVoiceInput((text) => {
         setInput(prev => prev + (prev ? ' ' : '') + text);
     }, selectedHwnd);
@@ -134,10 +153,14 @@ export function ChatArea({
                 setShowConfigDropdown(false);
                 setShowGetCodeDropdown(false);
             }
+            // Закрываем меню команд при клике вне
+            if (showCommands) {
+                setShowCommands(false);
+            }
         };
         document.addEventListener('mousedown', handleClickOutside);
         return () => document.removeEventListener('mousedown', handleClickOutside);
-    }, []);
+    }, [showCommands]);
 
     const scrollRef = useRef<HTMLDivElement>(null);
     const wasAtBottom = useRef(true);
@@ -219,23 +242,121 @@ export function ChatArea({
         }
     }, [messages, isLoading, onActiveDiffChange, contextCode, modifiedCode, onApplyCode, appliedDiffMessages, activeDiffContent, onCodeLoaded]);
 
-    const handleSendMessage = () => {
-        if (!input.trim() || isLoading) return;
+    const handleSendMessage = (textOverride?: string) => {
+        let textToSend = textOverride || input;
 
-        // Stop voice recording if active when sending
-        if (isRecording) {
-            toggleRecording();
+        // Автоматическое расширение слеш-команд
+        let displayContent: string | undefined = undefined;
+        let isSlashCommand = false;
+
+        if (!textOverride && textToSend.startsWith('/')) {
+            const firstSpace = textToSend.indexOf(' ');
+            const cmdPart = firstSpace === -1 ? textToSend.substring(1) : textToSend.substring(1, firstSpace);
+            const queryPart = firstSpace === -1 ? '' : textToSend.substring(firstSpace + 1).trim();
+
+            const foundCmd = availableCommands.find(c => c.command.toLowerCase() === cmdPart.toLowerCase());
+            if (foundCmd) {
+                isSlashCommand = true;
+                displayContent = textToSend; // Сохраняем "/итс вопрос" для отображения
+
+                // Проверка для /итс
+                if (foundCmd.id === 'its') {
+                    const naparnik = settings?.mcp_servers.find(s => s.id === 'builtin-1c-naparnik');
+                    if (!naparnik || !naparnik.enabled) {
+                        alert('Для использования команды /итс необходимо включить MCP сервер "Напарник" в настройках.');
+                        return;
+                    }
+                }
+
+                let expanded = foundCmd.template;
+                const diagStringsText = (diagnostics || []).map((d: any) => `- Line ${d.line + 1}: ${d.message} (${d.severity})`).join('\n');
+                expanded = expanded.replace('{diagnostics}', diagStringsText || 'Ошибок не обнаружено');
+                expanded = expanded.replace('{code}', contextCode || modifiedCode || '');
+                expanded = expanded.replace('{query}', queryPart);
+                textToSend = expanded;
+            }
         }
 
+        if (!textToSend.trim() || isLoading) return;
+
+        // ... rest of the logic ...
+
         const diagStrings = (diagnostics || []).map((d: any) => `- Line ${d.line + 1}: ${d.message} (${d.severity})`);
-        sendMessage(input, contextCode || modifiedCode, diagStrings);
+
+        // Если это расширенная слеш-команда, мы НЕ передаем contextCode повторно, 
+        // так как он уже вставлен в expanded-шаблон через {code}
+        const finalContext = isSlashCommand ? undefined : (contextCode || modifiedCode);
+
+        sendMessage(textToSend, finalContext, diagStrings, displayContent);
         setInput('');
         // Clear context after sending
         setContextCode('');
         setIsContextSelection(false);
     };
 
+    const handleSelectCommand = (cmd: SlashCommand) => {
+        // Находим позицию слеша, чтобы заменить его на саму команду или шаблон
+        const lastSlashIndex = input.lastIndexOf('/');
+        if (lastSlashIndex === -1) return;
+
+        const beforeSlash = input.substring(0, lastSlashIndex);
+        const afterSlash = input.substring(lastSlashIndex + 1);
+
+        // Извлекаем query (все что после первого пробела в 'afterSlash', если он есть)
+        const firstSpaceInAfter = afterSlash.indexOf(' ');
+        const queryPart = firstSpaceInAfter === -1 ? '' : afterSlash.substring(firstSpaceInAfter + 1).trim();
+
+        // Вместо немедленной отправки, подставляем команду в поле ввода
+        // Если команда системная и сложная (как /исправить), оставляем как есть,
+        // но для удобства пользователя мы просто вставляем "/команда "
+        const newValue = `${beforeSlash}/${cmd.command} ${queryPart}`.trim() + ' ';
+        setInput(newValue);
+
+        setShowCommands(false);
+        setCommandFilter('');
+
+        // Устанавливаем фокус обратно в textarea (через ref, если он есть)
+        // Но так как input привязан к состоянию, пользователь просто продолжит ввод
+    };
+
+    const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+        const value = e.target.value;
+        const cursorPosition = e.target.selectionStart;
+        setInput(value);
+
+        // Логика открытия меню команд
+        if (value && cursorPosition > 0) {
+            const textBeforeCursor = value.substring(0, cursorPosition);
+            const lastSlashIndex = textBeforeCursor.lastIndexOf('/');
+
+            if (lastSlashIndex !== -1) {
+                // Проверяем, что перед слешем либо начало строки, либо пробел
+                const charBeforeSlash = lastSlashIndex > 0 ? textBeforeCursor[lastSlashIndex - 1] : '';
+                if (charBeforeSlash === '' || charBeforeSlash === ' ' || charBeforeSlash === '\n') {
+                    const filterText = textBeforeCursor.substring(lastSlashIndex + 1);
+                    // Фильтр не должен содержать пробелов (команда заканчивается пробелом)
+                    if (!filterText.includes(' ')) {
+                        setShowCommands(true);
+                        setCommandFilter(filterText);
+                        return;
+                    }
+                }
+            }
+        }
+
+        if (showCommands) {
+            setShowCommands(false);
+        }
+    };
+
     const handleKeyDown = (e: React.KeyboardEvent) => {
+        if (showCommands) {
+            // В меню команд перехватываем стрелки и Enter
+            if (e.key === 'ArrowUp' || e.key === 'ArrowDown' || e.key === 'Enter' || e.key === 'Escape') {
+                return;
+            }
+        }
+
         if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault();
             handleSendMessage();
@@ -499,7 +620,7 @@ export function ChatArea({
                                                 </div>
                                             </div>
                                         ) : (
-                                            <pre className="whitespace-pre-wrap font-sans break-words break-all overflow-hidden" style={{ fontFamily: 'Inter, sans-serif', overflowWrap: 'anywhere' }}>{msg.content}</pre>
+                                            <pre className="whitespace-pre-wrap font-sans break-words break-all overflow-hidden" style={{ fontFamily: 'Inter, sans-serif', overflowWrap: 'anywhere' }}>{msg.displayContent || msg.content}</pre>
                                         )}
                                     </div>
 
@@ -551,12 +672,21 @@ export function ChatArea({
                     <textarea
                         ref={inputRef}
                         value={input}
-                        onChange={(e) => setInput(e.target.value)}
+                        onChange={handleInputChange}
                         onKeyDown={handleKeyDown}
-                        placeholder="Опишите задачу или вставьте код..."
+                        placeholder="Опишите задачу, вставьте код или введите / для команд..."
                         className="w-full h-full bg-transparent text-zinc-300 px-4 py-3 resize-none focus:outline-none placeholder-zinc-600 text-[13px] font-sans leading-relaxed flex-1"
                         style={{ fontFamily: 'Inter, sans-serif' }}
                     />
+
+                    {showCommands && filteredCommands.length > 0 && (
+                        <CommandMenu
+                            commands={filteredCommands}
+                            onSelect={handleSelectCommand}
+                            onClose={() => setShowCommands(false)}
+                            anchorRect={inputRef.current?.getBoundingClientRect() || null}
+                        />
+                    )}
 
                     <div ref={dropdownRef} className="px-3 pb-2 pt-0 flex items-end gap-2 pointer-events-auto flex-wrap w-full">
                         <div className="flex items-center gap-1.5 flex-1 min-w-0">
@@ -732,7 +862,7 @@ export function ChatArea({
                                 </div>
                             )}
 
-                            <button onClick={isLoading ? stopChat : handleSendMessage} disabled={!isLoading && !input.trim()} className={`w-8 h-8 flex items-center justify-center rounded-lg transition-colors flex-shrink-0 ${isLoading ? 'bg-red-500/10 text-red-400' : input.trim() ? 'bg-blue-600 text-white' : 'bg-[#27272a] text-zinc-600'}`}>
+                            <button onClick={isLoading ? stopChat : () => handleSendMessage()} disabled={!isLoading && !input.trim()} className={`w-8 h-8 flex items-center justify-center rounded-lg transition-colors flex-shrink-0 ${isLoading ? 'bg-red-500/10 text-red-400' : input.trim() ? 'bg-blue-600 text-white' : 'bg-[#27272a] text-zinc-600'}`}>
                                 {isLoading ? <Square className="w-4 h-4 fill-current" /> : <ArrowUp className="w-4 h-4" strokeWidth={2.5} />}
                             </button>
                         </div>

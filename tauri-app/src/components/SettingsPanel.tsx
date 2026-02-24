@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { open } from '@tauri-apps/plugin-dialog';
-import { X, Save, Cpu, Monitor, FileCode, Database, Bug, MessageSquare } from 'lucide-react';
+import { X, Save, Cpu, Monitor, FileCode, Database, Bug, MessageSquare, Terminal } from 'lucide-react';
 
 import { LLMSettings } from './settings/LLMSettings';
 import { MCPSettings } from './settings/MCPSettings';
@@ -10,18 +10,20 @@ import { ConfiguratorTab } from './settings/ConfiguratorTab';
 import { BslTab } from './settings/BslTab';
 import { DebugTab } from './settings/DebugTab';
 import { PromptsTab } from './settings/PromptsTab';
+import { SlashCommandsTab } from './settings/SlashCommandsTab';
 
 import { useProfiles } from '../contexts/ProfileContext';
+import { useSettings } from '../contexts/SettingsContext';
 import { WindowInfo, BslStatus, AppSettings, BslDiagnosticItem } from '../types/settings';
 
 interface SettingsPanelProps {
     isOpen: boolean;
     onClose: () => void;
-    initialTab?: 'configurator' | 'llm' | 'bsl' | 'mcp' | 'debug' | 'prompts';
+    initialTab?: 'configurator' | 'llm' | 'bsl' | 'mcp' | 'debug' | 'prompts' | 'slash_commands';
 }
 
 export function SettingsPanel({ isOpen, onClose, initialTab }: SettingsPanelProps) {
-    const [tab, setTab] = useState<'llm' | 'configurator' | 'bsl' | 'mcp' | 'debug' | 'prompts'>('llm');
+    const [tab, setTab] = useState<'llm' | 'configurator' | 'bsl' | 'mcp' | 'debug' | 'prompts' | 'slash_commands'>('llm');
 
     useEffect(() => {
         if (isOpen && initialTab) {
@@ -30,6 +32,7 @@ export function SettingsPanel({ isOpen, onClose, initialTab }: SettingsPanelProp
     }, [isOpen, initialTab]);
 
     const { profiles, activeProfileId, loadProfiles } = useProfiles();
+    const { loadSettings } = useSettings();
     const [settings, setSettings] = useState<AppSettings | null>(null);
     const [saving, setSaving] = useState(false);
 
@@ -67,6 +70,7 @@ export function SettingsPanel({ isOpen, onClose, initialTab }: SettingsPanelProp
         setSaving(true);
         try {
             await invoke('save_settings', { newSettings: settings });
+            await loadSettings(); // Синхронизируем глобальный контекст
         } catch (err) {
             console.error('Failed to save settings:', err);
         }
@@ -178,26 +182,27 @@ export function SettingsPanel({ isOpen, onClose, initialTab }: SettingsPanelProp
                 </div>
 
                 {/* Tabs */}
-                <div className="flex border-b border-zinc-800 bg-zinc-900/50 overflow-x-auto scrollbar-hide no-scrollbar">
+                <div className="flex border-b border-zinc-800 bg-zinc-900/50 overflow-x-auto scrollbar-thin">
                     {[
-                        { id: 'llm' as const, label: 'LLM Profiles', icon: Cpu },
-                        { id: 'configurator' as const, label: 'Configurator', icon: Monitor },
-                        { id: 'bsl' as const, label: 'BSL Server', icon: FileCode },
-                        { id: 'mcp' as const, label: 'MCP Servers', icon: Database },
+                        { id: 'llm' as const, label: 'LLM', icon: Cpu },
+                        { id: 'configurator' as const, label: 'Конфиг', icon: Monitor },
+                        { id: 'bsl' as const, label: 'BSL', icon: FileCode },
+                        { id: 'mcp' as const, label: 'MCP', icon: Database },
                         { id: 'prompts' as const, label: 'Промпты', icon: MessageSquare },
+                        { id: 'slash_commands' as const, label: 'Команды', icon: Terminal },
                         { id: 'debug' as const, label: 'Debug', icon: Bug },
                     ].map((t) => (
                         <button
                             key={t.id}
                             onClick={() => setTab(t.id)}
                             title={t.label}
-                            className={`flex items-center gap-2 px-4 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm font-medium transition-colors border-b-2 whitespace-nowrap flex-shrink-0 ${tab === t.id
+                            className={`flex items-center gap-2 px-2.5 sm:px-4 py-3 sm:py-4 text-xs sm:text-sm font-medium transition-all border-b-2 whitespace-nowrap flex-shrink-0 ${tab === t.id
                                 ? 'border-blue-500 text-blue-400 bg-zinc-800/50'
                                 : 'border-transparent text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/30'
                                 }`}
                         >
-                            <t.icon className="w-4 h-4" />
-                            <span className="hidden min-[500px]:inline">{t.label}</span>
+                            <t.icon className="w-4 h-4 shrink-0" />
+                            <span className="hidden min-[700px]:inline">{t.label}</span>
                         </button>
                     ))}
                 </div>
@@ -217,6 +222,19 @@ export function SettingsPanel({ isOpen, onClose, initialTab }: SettingsPanelProp
                         <div className="p-4 sm:p-8 w-full h-full overflow-y-auto scrollbar-thin">
                             <div className="max-w-2xl mx-auto">
                                 <PromptsTab
+                                    settings={settings}
+                                    onSettingsChange={setSettings}
+                                    onSave={handleSaveSettings}
+                                    saving={saving}
+                                />
+                            </div>
+                        </div>
+                    )}
+
+                    {tab === 'slash_commands' && settings && (
+                        <div className="p-4 sm:p-8 w-full h-full overflow-y-auto scrollbar-thin text-zinc-300">
+                            <div className="max-w-2xl mx-auto">
+                                <SlashCommandsTab
                                     settings={settings}
                                     onSettingsChange={setSettings}
                                     onSave={handleSaveSettings}
