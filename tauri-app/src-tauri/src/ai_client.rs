@@ -196,18 +196,64 @@ Procedure MyFunction()
 
 6. **OUTPUT FORMAT (CRITICAL):**
    - When using SEARCH/REPLACE blocks, do NOT add a separate ```bsl...``` code block with the full or partial file content.
-   - Your response must contain: text explanation (optional) + SEARCH/REPLACE blocks ONLY.
+   - Your response must contain ONLY the necessary text explanation + SEARCH/REPLACE blocks.
+   - **FORBIDDEN (CRITICAL)**: Do NOT add phrases like "Below are the changes...", "Ниже приведены исправления...", "Ниже приведен код...", "Вот исправления в формате SEARCH/REPLACE" or any meta-talk about the format itself.
    - **FORBIDDEN**: Adding an empty ```bsl``` block or a full file listing alongside SEARCH/REPLACE blocks.
-   - The SEARCH/REPLACE blocks ARE the code changes. No need to repeat the code in another format.
+   - The SEARCH/REPLACE blocks ARE the code changes.
 "#;
 
+const TWO_STEP_PLANNING_RULES: &str = r#"
+=== TWO-STEP PLANNING AND LANGUAGE RULES ===
+
+1. AUTOMATIC PLANNING (CRITICAL):
+   - For COMPLEX tasks (multiple steps, tool usage, architectural questions), you MUST start your response with a `<thinking>` tag.
+   - For SIMPLE tasks (greetings, simple questions, single-line code changes), you MAY skip the `<thinking>` tag and reply directly.
+   - You decide whether to plan or not based on the complexity of the user's request.
+
+2. LANGUAGE RULES (STRICT COMPLIANCE):
+   - THE `<thinking>` BLOCK MUST BE IN ENGLISH regardless of the user's language. This is for internal logic and better reasoning.
+   - THE FINAL RESPONSE (AFTER `</thinking>` OR DIRECTLY) MUST BE IN THE USER'S LANGUAGE.
+   - If the user's request contains Cyrillic (Russian) characters, the final response MUST be in RUSSIAN.
+   - Default to RUSSIAN for the final response unless the user specifically asks in another language.
+
+3. PLANNING CONTENT (INSIDE `<thinking>`):
+   - Analyze the goal.
+   - List the tools (MCP) you intend to use.
+   - Outline the steps to reach the result.
+   - Do NOT include final code or final answer inside `<thinking>`.
+"#;
+
+/// Helper to detect target language based on message content
+fn detect_target_lang(messages: &[ApiMessage]) -> String {
+    // 1. Check for Cyrillic in the last user message
+    for msg in messages.iter().rev() {
+        if msg.role == "user" {
+            let clean_text: String = if let Some(content) = &msg.content {
+                content.lines()
+                    .filter(|l| !l.trim().starts_with('/'))
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            } else {
+                "".to_string()
+            };
+            
+            if clean_text.chars().any(|c| c >= '\u{0400}' && c <= '\u{04FF}') {
+                return "Russian".to_string();
+            }
+            break;
+        }
+    }
+    "Russian".to_string() // Default to Russian (system language)
+}
+
 /// Get dynamic system prompt based on available tools
-pub fn get_system_prompt(available_tools: &[ToolInfo]) -> String {
+pub fn get_system_prompt(available_tools: &[ToolInfo], messages: &[ApiMessage]) -> String {
     let settings = load_settings();
     let custom = &settings.custom_prompts;
     let code_gen = &settings.code_generation;
     
     let mut prompt = String::new();
+    let target_lang = detect_target_lang(messages);
     
     // 1. Применяем пресет поведения (Behavior Preset)
     match code_gen.behavior_preset {
@@ -223,9 +269,16 @@ pub fn get_system_prompt(available_tools: &[ToolInfo]) -> String {
     // 2. Базовый промпт - всегда используем DIFF_FORMAT_INSTRUCTIONS (SEARCH/REPLACE)
     // согласно требованию максимального упрощения и надежности.
     let code_rules = DIFF_FORMAT_INSTRUCTIONS;
+    let planning_rules = TWO_STEP_PLANNING_RULES;
     
     prompt.push_str(&format!(
         r#"Ты - AI-ассистент для разработки на платформе 1С:Предприятие.
+
+{}
+
+=== LANGUAGE HINT ===
+- THE TARGET LANGUAGE FOR THE FINAL RESPONSE IS: **{}**.
+- REQUIRED: Think in English inside `<thinking>`, but respond in {}!
 
 {}
 Твоя ГЛАВНАЯ ЦЕЛЬ: Выполнять запросы пользователя МАКСИМАЛЬНО ТОЧНО, НЕ ВНОСЯ НИКАКИХ ЛИШНИХ ИЗМЕНЕНИЙ.
@@ -248,9 +301,9 @@ pub fn get_system_prompt(available_tools: &[ToolInfo]) -> String {
 - Изменения кода (SEARCH/REPLACE) — ТОЛЬКО если запрос содержит явное действие: "исправь", "добавь", "измени", "перепиши", "удали", "создай", "реализуй", "оптимизируй".
 - ПУСТОЙ МОДУЛЬ: Если исходный код BSL пуст или содержит только маркер/комментарии, а пользователь просит "добавить", "создать" или "написать" — генерируй ПОЛНЫЙ текст модуля с нуля в блоке ```bsl. Не пытайся использовать SEARCH/REPLACE для абсолютно пустого файла.
 
-Используй русский язык в ответах. Форматируй код в блоках ```bsl...```.
+Используй {} язык в финальном ответе. Форматируй код в блоках ```bsl...```.
 При написании или исправлении кода соблюдай каноническое написание ключевых слов 1С (BSL)."#,
-        code_rules
+        planning_rules, target_lang, target_lang, code_rules, target_lang
     ));
 
     // 3. Инструкции для маркировки (только если включено или в режиме Maintenance)
@@ -549,7 +602,7 @@ pub async fn stream_chat_completion(
     // Build messages with dynamic system prompt
     let mut api_messages = vec![ApiMessage {
         role: "system".to_string(),
-        content: Some(get_system_prompt(&tools_info)),
+        content: Some(get_system_prompt(&tools_info, &messages)),
         tool_calls: None,
         tool_call_id: None,
         name: None,
@@ -638,9 +691,11 @@ pub async fn stream_chat_completion(
     let mut stream = response.bytes_stream();
     let mut buffer = String::new();
     let mut full_content = String::new();
+    let mut content_search_temp = String::new();
     let mut accumulated_tool_calls: Vec<ToolCall> = Vec::new();
     let mut announced_tool_calls = std::collections::HashSet::new();
     let mut is_thinking = false;
+    let mut has_switched_to_executing = false;
     let mut first_token_received = false;
     let start_gen_time = std::time::Instant::now();
     
@@ -674,38 +729,75 @@ pub async fn stream_chat_completion(
                         if let Some(choice) = chunk.choices.first() {
                             // 1. Handle content & thinking tags
                             if let Some(content) = &choice.delta.content {
-                                let mut current_content = content.as_str();
+                                // 0. Switch status if this is the first real content and we are not thinking
+                                if !has_switched_to_executing && !is_thinking && !content.trim().is_empty() {
+                                    let _ = app_handle.emit("chat-status", "Выполнение...");
+                                    has_switched_to_executing = true;
+                                }
+
+                                // Add to persistent search buffer
+                                content_search_temp.push_str(content);
                                 
-                                // Simple state machine for <thinking> tags
-                                while !current_content.is_empty() {
+                                // Process the search buffer
+                                loop {
                                     if !is_thinking {
-                                        if let Some(start_pos) = current_content.find("<thinking>") {
-                                            // Emit text before <thinking>
+                                        if let Some(start_pos) = content_search_temp.find("<thinking>") {
+                                            // 1. Text before <thinking> goes to regular chat
                                             if start_pos > 0 {
-                                                let text = &current_content[..start_pos];
-                                                full_content.push_str(text);
-                                                let _ = app_handle.emit("chat-chunk", text.to_string());
+                                                let text = content_search_temp[..start_pos].to_string();
+                                                full_content.push_str(&text);
+                                                let _ = app_handle.emit("chat-chunk", text);
                                             }
+                                            
+                                            // 2. Start thinking
                                             is_thinking = true;
-                                            current_content = &current_content[start_pos + 10..];
+                                            let _ = app_handle.emit("chat-status", "Планирование (EN)...");
+                                            
+                                            // 3. Remove processed part including tag
+                                            content_search_temp = content_search_temp[start_pos + 10..].to_string();
+                                        } else if let Some(last_lt) = content_search_temp.rfind('<') {
+                                            // Potential tag start found. Emit everything before it.
+                                            if last_lt > 0 {
+                                                let text = content_search_temp[..last_lt].to_string();
+                                                full_content.push_str(&text);
+                                                let _ = app_handle.emit("chat-chunk", text);
+                                                content_search_temp = content_search_temp[last_lt..].to_string();
+                                            }
+                                            break;
                                         } else {
-                                            // No <thinking> tag, process everything
-                                            full_content.push_str(current_content);
-                                            let _ = app_handle.emit("chat-chunk", current_content.to_string());
+                                            // No '<' found, emit everything
+                                            full_content.push_str(&content_search_temp);
+                                            let _ = app_handle.emit("chat-chunk", content_search_temp.clone());
+                                            content_search_temp.clear();
                                             break;
                                         }
                                     } else {
-                                        if let Some(end_pos) = current_content.find("</thinking>") {
-                                            // Emit thinking chunk before </thinking>
+                                        if let Some(end_pos) = content_search_temp.find("</thinking>") {
+                                            // 1. Text before </thinking> goes to thinking channel
                                             if end_pos > 0 {
-                                                let text = &current_content[..end_pos];
-                                                let _ = app_handle.emit("chat-thinking-chunk", text.to_string());
+                                                let text = content_search_temp[..end_pos].to_string();
+                                                let _ = app_handle.emit("chat-thinking-chunk", text);
                                             }
+                                            
+                                            // 2. Stop thinking
                                             is_thinking = false;
-                                            current_content = &current_content[end_pos + 11..];
+                                            has_switched_to_executing = true;
+                                            let _ = app_handle.emit("chat-status", "Выполнение...");
+                                            
+                                            // 3. Remove processed part including tag
+                                            content_search_temp = content_search_temp[end_pos + 11..].to_string();
+                                        } else if let Some(last_lt) = content_search_temp.rfind('<') {
+                                            // Potential end-tag start found.
+                                            if last_lt > 0 {
+                                                let text = content_search_temp[..last_lt].to_string();
+                                                let _ = app_handle.emit("chat-thinking-chunk", text);
+                                                content_search_temp = content_search_temp[last_lt..].to_string();
+                                            }
+                                            break;
                                         } else {
-                                            // Still thinking, emit everything
-                                            let _ = app_handle.emit("chat-thinking-chunk", current_content.to_string());
+                                            // No '<' found, emit everything to thinking
+                                            let _ = app_handle.emit("chat-thinking-chunk", content_search_temp.clone());
+                                            content_search_temp.clear();
                                             break;
                                         }
                                     }

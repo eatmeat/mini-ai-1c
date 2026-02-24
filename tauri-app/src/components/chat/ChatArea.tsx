@@ -196,6 +196,17 @@ export function ChatArea({
         return () => clearTimeout(timer);
     }, [messages, isLoading]);
 
+    // Automatically expand thinking block when it starts arriving
+    useEffect(() => {
+        if (isLoading && messages.length > 0) {
+            const lastIndex = messages.length - 1;
+            const lastMessage = messages[lastIndex];
+            if (lastMessage.role === 'assistant' && lastMessage.thinking && !expandedThinking[lastIndex]) {
+                setExpandedThinking(prev => ({ ...prev, [lastIndex]: true }));
+            }
+        }
+    }, [messages, isLoading, expandedThinking]);
+
     // Прокрутка вниз при отправке нового сообщения пользователем (всегда плавно)
     useEffect(() => {
         if (messages.length > 0 && messages[messages.length - 1].role === 'user') {
@@ -517,7 +528,7 @@ export function ChatArea({
                                                         className="flex items-center gap-2 text-[11px] text-white/40 hover:text-white/60 uppercase tracking-tighter mb-1 transition-colors group"
                                                     >
                                                         <Brain size={12} className={expandedThinking[i] ? 'text-blue-400' : ''} />
-                                                        Думаю
+                                                        {msg.thinking && isLoading && i === messages.length - 1 && chatStatus ? chatStatus : 'Думаю'}
                                                         <ChevronDown size={12} className={`transition-transform ${expandedThinking[i] ? 'rotate-180' : ''}`} />
                                                     </button>
                                                     {expandedThinking[i] && (

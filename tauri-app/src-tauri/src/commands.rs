@@ -207,7 +207,7 @@ pub async fn stream_chat(
     }
 
     // 1. Initial status
-    let _ = app_handle.emit("chat-status", "Думаю...");
+    let _ = app_handle.emit("chat-status", "Инициализация...");
 
     // Convert to API messages
     let mut api_messages: Vec<ApiMessage> = messages
@@ -226,7 +226,7 @@ pub async fn stream_chat(
     
     let join_handle = tokio::spawn(async move {
         // 1. Initial status
-        let _ = task_app_handle.emit("chat-status", "Думаю...");
+        let _ = task_app_handle.emit("chat-status", "Инициализация...");
         
         let bsl_state = task_app_handle.state::<Arc<tokio::sync::Mutex<crate::bsl_client::BSLClient>>>();
         let settings = crate::settings::load_settings();

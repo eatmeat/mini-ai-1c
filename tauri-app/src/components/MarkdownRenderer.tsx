@@ -13,15 +13,34 @@ interface MarkdownRendererProps {
     originalCode?: string; // Original code for diff view
 }
 
-// Утилита для очистки diff-артефактов (временно, пока не перенесли в diffViewer)
+// Утилита для очистки diff-артефактов и технических фраз
 function cleanDiffArtifacts(content: string): string {
-    // Hide completed blocks
-    let cleaned = content.replace(/<<<<<<< SEARCH[\s\S]*?>>>>>>> REPLACE/g, '');
+    let cleaned = content;
 
-    // Hide incomplete blocks during streaming (anything after the last <<<<<<< SEARCH)
-    if (cleaned.includes('<<<<<<< SEARCH')) {
-        cleaned = cleaned.split('<<<<<<< SEARCH')[0];
+    // 1. Удаляем специфические префиксы, которые иногда добавляет ЛЛМ
+    const metaPhrases = [
+        /Ниже приведены исправления в формате SEARCH\/REPLACE:?/gi,
+        /Ниже приведены исправления в формате «Поиск\/Замена»:?/gi,
+        /Below are the changes in SEARCH\/REPLACE format:?/gi,
+        /Ниже приведен код с исправлениями:?/gi
+    ];
+
+    for (const phrase of metaPhrases) {
+        cleaned = cleaned.replace(phrase, '');
     }
+
+    // 2. Скрываем завершенные блоки (match 5-10 chevrons)
+    cleaned = cleaned.replace(/<{5,10} SEARCH[\s\S]*?>{5,10} REPLACE/g, '');
+
+    // 3. Скрываем незавершенные блоки при стриминге
+    const searchMarker = cleaned.match(/<{5,10} SEARCH/);
+    if (searchMarker && cleaned.includes(searchMarker[0])) {
+        cleaned = cleaned.split(searchMarker[0])[0];
+    }
+
+    // 4. Удаляем одиночные строки, состоящие только из шевронов (5-10 штук) и мусора
+    cleaned = cleaned.replace(/^<{5,10}\s*$/gm, '');
+    cleaned = cleaned.replace(/^>{5,10}\s*$/gm, '');
 
     return cleaned.trim();
 }
