@@ -176,6 +176,18 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({ onComplete }
             };
 
             await updateSettings(newSettings);
+
+            // Если BSL настроен и JAR скачан — запустить BSL сразу.
+            // При первом запуске приложения jar_path был пустой, поэтому auto-start провалился.
+            // Теперь JAR есть — вызываем reconnect чтобы BSL заработал без ручного вмешательства.
+            if (newSettings.bsl_server.enabled && newSettings.bsl_server.jar_path) {
+                try {
+                    await invoke('reconnect_bsl_ls_cmd');
+                } catch (e) {
+                    console.warn('[Onboarding] BSL LS auto-start failed (non-critical):', e);
+                }
+            }
+
             onComplete();
         } catch (e) {
             console.error("Failed to complete onboarding:", e);

@@ -97,11 +97,21 @@ impl BSLClient {
         }
     }
 
-    /// Find an available TCP port starting from the preferred port
+    /// Check if a port has an active listener (someone is already listening on it).
+    /// Uses connect() instead of bind() — reliable on Windows across multiple user sessions.
+    fn is_port_listening(port: u16) -> bool {
+        std::net::TcpStream::connect_timeout(
+            &std::net::SocketAddr::from(([127, 0, 0, 1], port)),
+            std::time::Duration::from_millis(50),
+        ).is_ok()
+    }
+
+    /// Find a free TCP port starting from the preferred port.
+    /// Uses connect() to check occupation — correctly handles Windows SO_REUSEADDR behavior.
     fn find_available_port(preferred: u16) -> u16 {
         let mut port = preferred;
         while port < preferred + 100 {
-            if std::net::TcpListener::bind(("127.0.0.1", port)).is_ok() {
+            if !Self::is_port_listening(port) {
                 return port;
             }
             port += 1;
@@ -115,19 +125,35 @@ impl BSLClient {
 
     /// Start the BSL Language Server
     pub fn start_server(&mut self) -> Result<(), String> {
+        // Guard: already running in this process instance
+        if self.server_process.is_some() {
+            crate::app_log!("[BSL LS] Already running in this instance, skipping start");
+            return Ok(());
+        }
+
         let settings = load_settings();
-        
+
         if !settings.bsl_server.enabled {
             return Err("BSL LS is disabled in settings".to_string());
         }
-        
+
         let jar_path = &settings.bsl_server.jar_path;
         if jar_path.is_empty() {
             return Err("BSL LS JAR path not configured".to_string());
         }
-        
-        // Dynamic port search for terminal server compatibility
+
         let preferred_port = settings.bsl_server.websocket_port;
+
+        // Check if BSL LS is already listening on the preferred port
+        // (e.g. started by another app instance or another user session on this machine).
+        // In that case reuse it instead of spawning a duplicate Java process.
+        if Self::is_port_listening(preferred_port) {
+            crate::app_log!("[BSL LS] Port {} already has a listener — reusing existing server", preferred_port);
+            self.actual_port = Some(preferred_port);
+            return Ok(());
+        }
+
+        // Find a truly free port (skips any occupied ports)
         let port = Self::find_available_port(preferred_port);
         self.actual_port = Some(port);
 
