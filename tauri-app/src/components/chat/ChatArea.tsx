@@ -5,7 +5,7 @@ import { useSettings } from '../../contexts/SettingsContext';
 import { useConfigurator } from '../../contexts/ConfiguratorContext';
 import { parseConfiguratorTitle } from '../../utils/configurator';
 import { MarkdownRenderer } from '../MarkdownRenderer';
-import { Loader2, Square, ArrowUp, Settings, ChevronDown, Monitor, RefreshCw, FileText, MousePointerClick, Brain, Check, X, Terminal, Pencil, Play, Send, User, HardHat, Mic } from 'lucide-react';
+import { Loader2, Square, ArrowUp, Settings, ChevronDown, Monitor, RefreshCw, FileText, MousePointerClick, Brain, Check, X, Terminal, Pencil, Play, Send, User, HardHat, Mic, MoreHorizontal } from 'lucide-react';
 import { useVoiceInput } from '../../voice/useVoiceInput';
 import logo from '../../assets/logo.png';
 import ToolCallBlock from './ToolCallBlock';
@@ -522,7 +522,7 @@ export function ChatArea({
     };
 
     return (
-        <div id="chat-area" className="flex flex-col flex-1 min-w-[400px] transition-all duration-300">
+        <div id="chat-area" className="flex flex-col flex-1 min-w-[300px] transition-all duration-300">
             {/* Messages List */}
             <div
                 ref={scrollRef}
@@ -821,47 +821,75 @@ export function ChatArea({
                         />
                     )}
 
-                    <div ref={dropdownRef} className="px-3 pb-2 pt-0 flex items-end gap-2 pointer-events-auto flex-wrap w-full">
+                    <div ref={dropdownRef} className="px-3 pb-2 pt-0 flex items-end gap-2 pointer-events-auto flex-nowrap w-full">
                         <div className="flex items-center gap-1.5 flex-1 min-w-0">
+                            {/* Кнопка [+] (Опции) */}
                             <div className="relative">
                                 <button
                                     onClick={() => setShowModelDropdown(!showModelDropdown)}
-                                    className="h-8 flex items-center gap-1.5 px-3 rounded-full bg-zinc-900 border border-zinc-800 text-zinc-300 hover:bg-zinc-800 transition-all text-[11px] font-medium active:scale-95"
+                                    className="h-8 w-12 flex items-center justify-center gap-1 rounded-xl bg-zinc-900 border border-zinc-800 text-zinc-300 hover:bg-zinc-800 transition-all active:scale-95 flex-shrink-0"
+                                    title="Настройки профиля и генерации"
                                 >
                                     {(() => {
-                                        const activeProfile = profiles.find(p => p.id === activeProfileId);
-                                        const isQwen = activeProfile?.provider === 'QwenCli';
-                                        const qwenStatus = cliStatuses['qwen'];
-                                        return (
-                                            <>
-                                                <Brain className={`w-3.5 h-3.5 ${isQwen ? 'text-amber-400' : 'text-blue-400'}`} />
-                                                {activeProfile?.name || 'Выберите профиль'}
-                                                {isQwen && activeProfile && cliStatuses[activeProfile.id]?.is_authenticated && cliStatuses[activeProfile.id].usage && (
-                                                    <span className={`text-[9px] font-mono px-1.5 py-0.5 rounded-full border ${cliStatuses[activeProfile.id].usage!.requests_limit > 0 && cliStatuses[activeProfile.id].usage!.requests_used / cliStatuses[activeProfile.id].usage!.requests_limit > 0.8
-                                                        ? 'bg-amber-500/15 text-amber-400 border-amber-500/30'
-                                                        : 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
-                                                        }`}>
-                                                        {cliStatuses[activeProfile.id].usage!.requests_used}{cliStatuses[activeProfile.id].usage!.requests_limit > 0 ? `/${cliStatuses[activeProfile.id].usage!.requests_limit}` : ''}
-                                                    </span>
-                                                )}
-                                                {isQwen && activeProfile && cliStatuses[activeProfile.id] && !cliStatuses[activeProfile.id].is_authenticated && (
-                                                    <span className="text-[9px] bg-red-500/15 text-red-400 border border-red-500/30 px-1.5 py-0.5 rounded-full">
-                                                        Войти
-                                                    </span>
-                                                )}
-                                            </>
-                                        );
+                                        const behavior = settings?.code_generation?.behavior_preset;
+                                        if (behavior === 'maintenance') return <HardHat className="w-4 h-4 text-orange-400" />;
+                                        if (behavior === 'project') return <User className="w-4 h-4 text-blue-400" />;
+                                        return <Brain className="w-4 h-4 text-blue-400" />;
                                     })()}
-                                    <ChevronDown className={`w-3 h-3 transition-transform duration-200 ${showModelDropdown ? 'rotate-180' : ''}`} />
+                                    <MoreHorizontal className="w-3.5 h-3.5 text-zinc-500" />
                                 </button>
 
                                 {showModelDropdown && (
                                     <div className="absolute bottom-full left-0 mb-2 w-64 bg-[#09090b] border border-[#27272a] rounded-xl shadow-2xl z-50 overflow-hidden py-1 animate-in slide-in-from-bottom-2 duration-200">
-                                        <div className="px-3 py-2 border-b border-[#27272a] mb-1">
+                                        {/* Behavior Preset Toggle (Перенесено в меню) */}
+                                        {settings?.code_generation && (
+                                            <>
+                                                <div className="px-3 py-1.5 border-b border-[#27272a] mb-1">
+                                                    <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Режим генерации</span>
+                                                </div>
+                                                <div className="px-3 py-1 flex gap-2">
+                                                    <button
+                                                        onClick={() => {
+                                                            updateSettings({
+                                                                ...settings,
+                                                                code_generation: {
+                                                                    ...settings.code_generation,
+                                                                    behavior_preset: 'project'
+                                                                }
+                                                            });
+                                                        }}
+                                                        className={`flex-1 flex items-center justify-center gap-1.5 p-2 rounded-md text-[11px] font-bold transition-all ${settings.code_generation.behavior_preset === 'project'
+                                                            ? 'bg-blue-500/15 text-blue-400 border border-blue-500/30 shadow-sm'
+                                                            : 'bg-zinc-800/50 text-zinc-500 hover:bg-zinc-800'
+                                                            }`}
+                                                    >
+                                                        <User className="w-3.5 h-3.5" /> СВОЙ
+                                                    </button>
+                                                    <button
+                                                        onClick={() => {
+                                                            updateSettings({
+                                                                ...settings,
+                                                                code_generation: {
+                                                                    ...settings.code_generation,
+                                                                    behavior_preset: 'maintenance'
+                                                                }
+                                                            });
+                                                        }}
+                                                        className={`flex-1 flex items-center justify-center gap-1.5 p-2 rounded-md text-[11px] font-bold transition-all ${settings.code_generation.behavior_preset === 'maintenance'
+                                                            ? 'bg-orange-500/15 text-orange-400 border border-orange-500/30 shadow-sm'
+                                                            : 'bg-zinc-800/50 text-zinc-500 hover:bg-zinc-800'
+                                                            }`}
+                                                    >
+                                                        <HardHat className="w-3.5 h-3.5" /> ЧУЖОЙ
+                                                    </button>
+                                                </div>
+                                            </>
+                                        )}
+
+                                        <div className="px-3 py-1.5 border-b border-[#27272a] mb-1 mt-1">
                                             <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Ваши профили</span>
                                         </div>
-                                        <div className="max-h-[350px] overflow-y-auto custom-scrollbar">
-                                            {/* Standard Assistants Section */}
+                                        <div className="max-h-[250px] overflow-y-auto custom-scrollbar">
                                             {profiles.filter(p => p.provider !== 'QwenCli').length > 0 && (
                                                 <>
                                                     <div className="px-3 py-1.5 border-b border-[#27272a] mb-1 sticky top-0 bg-[#09090b] z-10">
@@ -885,8 +913,6 @@ export function ChatArea({
                                                     ))}
                                                 </>
                                             )}
-
-                                            {/* CLI Providers Section */}
                                             {profiles.filter(p => p.provider === 'QwenCli').length > 0 && (
                                                 <>
                                                     <div className="px-3 py-1.5 border-b border-[#27272a] mt-1 mb-1 sticky top-0 bg-[#09090b] z-10">
@@ -895,14 +921,12 @@ export function ChatArea({
                                                     {profiles.filter(p => p.provider === 'QwenCli').map(p => {
                                                         const status = cliStatuses[p.id];
                                                         const isAuthenticated = status?.is_authenticated;
-
                                                         return (
                                                             <div
                                                                 key={p.id}
                                                                 className={`group px-3 py-2 flex items-center justify-between cursor-pointer transition-colors ${activeProfileId === p.id ? 'bg-amber-500/10' : 'hover:bg-zinc-800/50'}`}
                                                                 onClick={() => {
                                                                     if (!isAuthenticated) {
-                                                                        // Set this profile as target before opening modal
                                                                         setActiveProfile(p.id);
                                                                         setIsAuthModalOpen(true);
                                                                     } else {
@@ -951,8 +975,8 @@ export function ChatArea({
                                 )}
                             </div>
 
-                            {/* Configurator Selector */}
-                            <div className="relative flex-shrink-0" id="configurator-selector">
+                            {/* Объединенный Конфигуратор & Код */}
+                            <div className="relative flex-shrink-0" id="tour-get-code">
                                 <button onClick={() => {
                                     const next = !showConfigDropdown;
                                     setShowConfigDropdown(next);
@@ -961,105 +985,55 @@ export function ChatArea({
                                         refreshWindows();
                                     }
                                 }}
-                                    className={`flex-shrink-0 flex items-center gap-1.5 text-[12px] font-medium px-2.5 h-8 rounded-md transition-all border border-transparent ${showConfigDropdown ? 'bg-zinc-800 text-zinc-200 border-zinc-700' : 'bg-zinc-800/50 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800'}`}
-                                    title={activeConfigTitle}
+                                    className={`flex-shrink-0 flex items-center gap-1.5 text-[12px] font-medium px-2.5 h-8 rounded-xl transition-all border border-transparent ${showConfigDropdown ? 'bg-zinc-800 text-zinc-200 border-zinc-700' : 'bg-zinc-800/50 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800'}`}
+                                    title="Выбор Конфигуратора и работа с кодом"
                                 >
-                                    <Monitor className="w-3.5 h-3.5 flex-shrink-0" />
-                                    <span className="sm:inline max-w-[120px] truncate block">{activeConfigTitle}</span>
+                                    <Monitor className="w-4 h-4 text-emerald-400" />
+                                    <span className="hidden sm:inline max-w-[150px] truncate block">{activeConfigTitle || 'Конфигуратор'}</span>
+                                    <ChevronDown className={`w-3 h-3 transition-transform duration-200 ml-1 ${showConfigDropdown ? 'rotate-180' : ''}`} />
                                 </button>
+
                                 {showConfigDropdown && (
-                                    <div className="absolute bottom-full left-0 mb-2 w-64 bg-[#1f1f23] border border-[#27272a] rounded-lg shadow-2xl z-30 ring-1 ring-black/20 p-1">
-                                        {detectedWindows.map(w => (
-                                            <button key={w.hwnd} onClick={() => { selectWindow(w.hwnd); setShowConfigDropdown(false); }}
-                                                className={`w-full text-left px-3 py-2 rounded-md text-[13px] truncate ${selectedHwnd === w.hwnd ? 'bg-blue-500/10 text-blue-400' : 'text-zinc-400 hover:bg-[#27272a]'}`}
-                                                title={w.title}
-                                            >
-                                                {parseConfiguratorTitle(w.title)}
+                                    <div className="absolute bottom-full left-0 mb-2 w-72 bg-[#1f1f23] border border-[#27272a] rounded-xl shadow-2xl z-30 ring-1 ring-black/20 flex flex-col overflow-hidden animate-in slide-in-from-bottom-2 duration-200">
+
+                                        {/* Секция выбора окон */}
+                                        <div className="px-3 py-2 border-b border-[#27272a] bg-[#09090b]">
+                                            <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider flex items-center gap-1.5"><Monitor className="w-3 h-3" /> Окна конфигуратора</span>
+                                        </div>
+                                        <div className="max-h-[200px] overflow-y-auto custom-scrollbar p-1">
+                                            {detectedWindows.length > 0 ? detectedWindows.map(w => (
+                                                <button key={w.hwnd} onClick={() => { selectWindow(w.hwnd); }}
+                                                    className={`w-full text-left px-3 py-2 rounded-md text-[13px] truncate transition-colors ${selectedHwnd === w.hwnd ? 'bg-emerald-500/10 text-emerald-400 font-medium' : 'text-zinc-400 hover:bg-[#27272a] hover:text-zinc-200'}`}
+                                                    title={w.title}
+                                                >
+                                                    {parseConfiguratorTitle(w.title)}
+                                                </button>
+                                            )) : (
+                                                <div className="px-3 py-4 text-center text-[12px] text-zinc-500">
+                                                    Окна не найдены
+                                                </div>
+                                            )}
+                                        </div>
+
+                                        {/* Секция действий с кодом */}
+                                        <div className="border-t border-[#27272a] bg-[#18181b] p-1 flex flex-col gap-0.5">
+                                            <button onClick={() => { handleLoadCode(true); setShowConfigDropdown(false); }} disabled={!selectedHwnd} className="flex items-center gap-2 px-3 py-2.5 text-[12px] font-medium text-zinc-300 hover:text-white hover:bg-emerald-500/20 hover:border-emerald-500/20 border border-transparent transition-all rounded-md disabled:opacity-50 disabled:cursor-not-allowed">
+                                                <FileText className="w-4 h-4 text-emerald-400 flex-shrink-0" />
+                                                <span>Получить модуль целиком</span>
                                             </button>
-                                        ))}
+                                            <button onClick={() => { handleLoadCode(false); setShowConfigDropdown(false); }} disabled={!selectedHwnd} className="flex items-center gap-2 px-3 py-2.5 text-[12px] font-medium text-zinc-300 hover:text-white hover:bg-emerald-500/20 hover:border-emerald-500/20 border border-transparent transition-all rounded-md disabled:opacity-50 disabled:cursor-not-allowed">
+                                                <MousePointerClick className="w-4 h-4 text-emerald-400 flex-shrink-0" />
+                                                <span>Получить выделенный фрагмент</span>
+                                            </button>
+                                        </div>
+
                                     </div>
                                 )}
                             </div>
-
-                            {/* Get Code Button */}
-                            <div className="relative flex-shrink-0" id="tour-get-code">
-                                <button onClick={() => {
-                                    const next = !showGetCodeDropdown;
-                                    setShowGetCodeDropdown(next);
-                                    if (next) {
-                                        setShowModelDropdown(false);
-                                        setShowConfigDropdown(false);
-                                    }
-                                }}
-                                    className={`flex-shrink-0 flex items-center gap-1.5 text-[12px] font-medium px-2 h-8 rounded-md transition-all border border-transparent ${showGetCodeDropdown ? 'bg-zinc-800 text-zinc-200 border-zinc-700' : 'bg-zinc-800/50 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800'}`}
-                                >
-                                    <FileText className="w-3.5 h-3.5" />
-                                    <span className="hidden xl:inline">Код</span>
-                                </button>
-                                {showGetCodeDropdown && (
-                                    <div className="absolute bottom-full right-0 mb-2 w-max min-w-[180px] bg-[#1f1f23] border border-[#27272a] rounded-lg shadow-2xl z-30 ring-1 ring-black/20 p-1 flex flex-col">
-                                        <button onClick={() => handleLoadCode(true)} className="flex items-center gap-2 px-3 py-2 text-[13px] text-zinc-400 hover:text-white hover:bg-[#27272a] transition-colors text-left rounded-md whitespace-nowrap">
-                                            <FileText className="w-3.5 h-3.5 flex-shrink-0" />
-                                            <span>Модуль целиком</span>
-                                        </button>
-                                        <button onClick={() => handleLoadCode(false)} className="flex items-center gap-2 px-3 py-2 text-[13px] text-zinc-400 hover:text-white hover:bg-[#27272a] transition-colors text-left rounded-md whitespace-nowrap">
-                                            <MousePointerClick className="w-3.5 h-3.5 flex-shrink-0" />
-                                            <span>Выделенный фрагмент</span>
-                                        </button>
-                                    </div>
-                                )}
-                            </div>
-
-                            {/* Behavior Preset Toggle */}
-                            {settings?.code_generation && (
-                                <div className="flex items-center bg-zinc-800/30 border border-zinc-700/50 rounded-lg p-0.5 h-8 flex-shrink-0">
-                                    <button
-                                        onClick={() => {
-                                            if (settings) {
-                                                updateSettings({
-                                                    ...settings,
-                                                    code_generation: {
-                                                        ...settings.code_generation,
-                                                        behavior_preset: 'project'
-                                                    }
-                                                });
-                                            }
-                                        }}
-                                        className={`flex items-center gap-1 px-2.5 h-full rounded-md text-[10px] font-bold transition-all ${settings.code_generation.behavior_preset === 'project'
-                                            ? 'bg-blue-500/15 text-blue-400 shadow-sm'
-                                            : 'text-zinc-600 hover:text-zinc-400'
-                                            }`}
-                                        title="Свой код: Чистая разработка, стандарты 1С"
-                                    >
-                                        <User className="w-3 h-3" />
-                                        <span className="hidden sm:inline">СВОЙ</span>
-                                    </button>
-                                    <button
-                                        onClick={() => {
-                                            if (settings) {
-                                                updateSettings({
-                                                    ...settings,
-                                                    code_generation: {
-                                                        ...settings.code_generation,
-                                                        behavior_preset: 'maintenance'
-                                                    }
-                                                });
-                                            }
-                                        }}
-                                        className={`flex items-center gap-1 px-2.5 h-full rounded-md text-[10px] font-bold transition-all ${settings.code_generation.behavior_preset === 'maintenance'
-                                            ? 'bg-orange-500/15 text-orange-400 shadow-sm'
-                                            : 'text-zinc-600 hover:text-zinc-400'
-                                            }`}
-                                        title="Чужой код: Изоляция правок, запрет рефакторинга"
-                                    >
-                                        <HardHat className="w-3 h-3" />
-                                        <span className="hidden sm:inline">ЧУЖОЙ</span>
-                                    </button>
-                                </div>
-                            )}
                         </div>
 
-                        <div className="flex items-center gap-1">
+                        {/* Правый блок кнопок (зафиксирован) */}
+                        <div className="flex items-center gap-1.5 flex-shrink-0">
                             {isSupported && (
                                 <div className="relative">
                                     {showVoiceHint && (

@@ -243,16 +243,16 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({ onComplete }
             provider: mappedProvider,
             name: selectedProvider === 'z.ai' ? 'Z.AI'
                 : selectedProvider === 'ollama' ? 'Ollama'
-                : selectedProvider === 'qwen' ? 'Qwen Code (CLI)'
-                : 'Custom AI',
+                    : selectedProvider === 'qwen' ? 'Qwen Code (CLI)'
+                        : 'Custom AI',
             model: modelName || (selectedProvider === 'z.ai' ? 'glm-5'
                 : selectedProvider === 'ollama' ? 'llama3'
-                : selectedProvider === 'qwen' ? 'coder-model'
-                : ''),
+                    : selectedProvider === 'qwen' ? 'coder-model'
+                        : ''),
             base_url: baseUrl || (selectedProvider === 'z.ai' ? 'https://api.z.ai/api/coding/paas/v4'
                 : selectedProvider === 'ollama' ? 'http://localhost:11434/v1'
-                : selectedProvider === 'qwen' ? 'https://portal.qwen.ai/v1'
-                : null),
+                    : selectedProvider === 'qwen' ? 'https://portal.qwen.ai/v1'
+                        : null),
             api_key_encrypted: '',
             max_tokens: 4096,
             temperature: 0.7
@@ -770,10 +770,10 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({ onComplete }
 
     const tourSteps = [
         {
-            title: "Выбор Конфигуратора",
-            desc: "Укажите активное окно Конфигуратора. Это позволит AI понимать, над какой базой вы сейчас работаете.",
+            title: "Конфигуратор и Код",
+            desc: "Укажите текущее окно Конфигуратора и получайте код модуля или выделенный фрагмент в один клик.",
             icon: <Monitor className="w-10 h-10 text-blue-400" />,
-            targetId: 'configurator-selector'
+            targetId: 'tour-get-code'
         },
         {
             title: "Интеллектуальный Чат",
