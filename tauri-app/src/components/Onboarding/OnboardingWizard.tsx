@@ -3,9 +3,11 @@ import { useSettings } from '../../contexts/SettingsContext';
 import { useProfiles } from '../../contexts/ProfileContext';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { Check, Server, Brain, Monitor, ArrowRight, Download, Terminal, Cloud, LogOut, ChevronRight, ChevronLeft, Bot, FileText, PanelRight } from 'lucide-react';
+import { Check, Server, Brain, Monitor, ArrowRight, Download, Terminal, Cloud, LogOut, ChevronRight, ChevronLeft, Bot, FileText, PanelRight, RefreshCw, LogIn } from 'lucide-react';
 import { LLMProfile } from '../../contexts/ProfileContext';
-import { AppSettings, DEFAULT_CUSTOM_PROMPTS, DEFAULT_CODE_GENERATION, DEFAULT_SLASH_COMMANDS } from '../../types/settings';
+import { AppSettings, DEFAULT_CUSTOM_PROMPTS, DEFAULT_CODE_GENERATION, DEFAULT_SLASH_COMMANDS, CliStatus } from '../../types/settings';
+import { QwenAuthModal } from '../settings/QwenAuthModal';
+import { cliProvidersApi } from '../../api/cli_providers';
 
 // --- Steps ---
 type Step = 'welcome' | 'environment' | 'llm-setup' | 'mcp-setup' | 'tour' | 'finish';
@@ -33,6 +35,10 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({ onComplete }
     const [baseUrl, setBaseUrl] = useState('');
     const [modelName, setModelName] = useState('');
     const [naparnikToken, setNaparnikToken] = useState(''); // 1C:Naparnik Token
+
+    // Qwen CLI State
+    const [isQwenAuthModalOpen, setIsQwenAuthModalOpen] = useState(false);
+    const [qwenCliStatus, setQwenCliStatus] = useState<CliStatus | null>(null);
 
     // Tour State
     const [tourStep, setTourStep] = useState(0);
@@ -190,6 +196,16 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({ onComplete }
         onComplete();
     };
 
+    const handleQwenAuthSuccess = async (accessToken: string, refreshToken: string | null, expiresAt: number, resourceUrl: string | null) => {
+        try {
+            await cliProvidersApi.saveToken('onboarding-profile', 'qwen', accessToken, refreshToken, expiresAt, resourceUrl);
+            const status = await cliProvidersApi.getStatus('onboarding-profile', 'qwen');
+            setQwenCliStatus(status);
+        } catch (e) {
+            console.error('Failed to save Qwen token:', e);
+        }
+    };
+
     const handleSaveProfile = async () => {
         if (!selectedProvider) {
             setStep('mcp-setup');
@@ -204,7 +220,8 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({ onComplete }
             'ollama': 'Ollama',
             'z.ai': 'ZAI',
             'openrouter': 'OpenRouter',
-            'custom': 'Custom'
+            'custom': 'Custom',
+            'qwen': 'QwenCli'
         };
 
         const mappedProvider = providerMap[selectedProvider] || 'OpenAI';
@@ -212,9 +229,18 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({ onComplete }
         let profile: any = {
             id: 'onboarding-profile',
             provider: mappedProvider,
-            name: selectedProvider === 'z.ai' ? 'Z.AI' : selectedProvider === 'ollama' ? 'Ollama' : 'Custom AI',
-            model: modelName || (selectedProvider === 'z.ai' ? 'glm-5' : selectedProvider === 'ollama' ? 'llama3' : ''),
-            base_url: baseUrl || (selectedProvider === 'z.ai' ? 'https://api.z.ai/api/coding/paas/v4' : selectedProvider === 'ollama' ? 'http://localhost:11434/v1' : null),
+            name: selectedProvider === 'z.ai' ? 'Z.AI'
+                : selectedProvider === 'ollama' ? 'Ollama'
+                : selectedProvider === 'qwen' ? 'Qwen Code (CLI)'
+                : 'Custom AI',
+            model: modelName || (selectedProvider === 'z.ai' ? 'glm-5'
+                : selectedProvider === 'ollama' ? 'llama3'
+                : selectedProvider === 'qwen' ? 'coder-model'
+                : ''),
+            base_url: baseUrl || (selectedProvider === 'z.ai' ? 'https://api.z.ai/api/coding/paas/v4'
+                : selectedProvider === 'ollama' ? 'http://localhost:11434/v1'
+                : selectedProvider === 'qwen' ? 'https://portal.qwen.ai/v1'
+                : null),
             api_key_encrypted: '',
             max_tokens: 4096,
             temperature: 0.7
@@ -414,7 +440,7 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({ onComplete }
             <h2 className="text-2xl font-bold text-white mb-2">Настройка LLM</h2>
             <p className="text-zinc-400">Выберите основного AI-провайдера и укажите токены.</p>
 
-            <div className="grid grid-cols-3 gap-4">
+            <div className="grid grid-cols-2 gap-4">
                 {/* z.ai */}
                 <div
                     onClick={() => {
@@ -451,6 +477,26 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({ onComplete }
                         <span className="font-bold text-white">Ollama</span>
                     </div>
                     <p className="text-xs text-zinc-400">Локальный, бесплатный, приватный.</p>
+                </div>
+
+                {/* Qwen CLI */}
+                <div
+                    onClick={() => {
+                        setSelectedProvider('qwen');
+                        setBaseUrl('https://portal.qwen.ai/v1');
+                        setModelName('coder-model');
+                    }}
+                    className={`p-4 rounded-xl border cursor-pointer transition-all ${selectedProvider === 'qwen'
+                        ? 'bg-cyan-600/20 border-cyan-500 ring-1 ring-cyan-500'
+                        : 'bg-zinc-800/50 border-zinc-700 hover:bg-zinc-800'
+                        }`}
+                >
+                    <div className="flex items-center gap-3 mb-2">
+                        <Bot className="w-6 h-6 text-cyan-400" />
+                        <span className="font-bold text-white">Qwen Code</span>
+                        <span className="text-[10px] px-1.5 py-0.5 bg-cyan-500/20 text-cyan-400 rounded font-medium">CLI</span>
+                    </div>
+                    <p className="text-xs text-zinc-400">Бесплатный Qwen через OAuth. Без ключа.</p>
                 </div>
 
                 {/* Custom / OpenAI */}
@@ -571,6 +617,72 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({ onComplete }
                             </div>
                         </>
                     )}
+
+                    {selectedProvider === 'qwen' && (
+                        <div className="space-y-4">
+                            {/* Auth Status */}
+                            <div className="flex items-center justify-between">
+                                <span className="text-sm font-medium text-zinc-300">Авторизация</span>
+                                {qwenCliStatus?.is_authenticated ? (
+                                    <span className="flex items-center gap-1.5 text-xs font-medium text-green-400 bg-green-500/10 px-2.5 py-1 rounded-full border border-green-500/20">
+                                        <Check className="w-3 h-3" /> Авторизован
+                                    </span>
+                                ) : (
+                                    <span className="flex items-center gap-1.5 text-xs font-medium text-zinc-500 bg-zinc-700/50 px-2.5 py-1 rounded-full border border-zinc-600/30">
+                                        Не авторизован
+                                    </span>
+                                )}
+                            </div>
+
+                            {/* Usage (if authenticated and available) */}
+                            {qwenCliStatus?.is_authenticated && qwenCliStatus.usage && (
+                                <div className="bg-zinc-800/60 rounded-lg p-3 space-y-2">
+                                    <div className="flex justify-between text-xs text-zinc-400">
+                                        <span>Использовано сегодня</span>
+                                        <span className="text-zinc-200 font-medium">
+                                            {qwenCliStatus.usage.requests_used} / {qwenCliStatus.usage.requests_limit || '∞'}
+                                        </span>
+                                    </div>
+                                    {qwenCliStatus.usage.requests_limit > 0 && (
+                                        <div className="w-full h-1.5 bg-zinc-700 rounded-full overflow-hidden">
+                                            <div
+                                                className={`h-full rounded-full transition-all ${(qwenCliStatus.usage.requests_used / qwenCliStatus.usage.requests_limit) > 0.8 ? 'bg-yellow-500' : 'bg-cyan-500'}`}
+                                                style={{ width: `${Math.min(100, (qwenCliStatus.usage.requests_used / qwenCliStatus.usage.requests_limit) * 100)}%` }}
+                                            />
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+
+                            {/* Login / Logout button */}
+                            {qwenCliStatus?.is_authenticated ? (
+                                <button
+                                    onClick={async () => {
+                                        try {
+                                            await cliProvidersApi.logout('onboarding-profile', 'qwen');
+                                            setQwenCliStatus(null);
+                                        } catch (e) {
+                                            console.error(e);
+                                        }
+                                    }}
+                                    className="w-full py-2 flex items-center justify-center gap-2 text-sm text-red-400 border border-red-500/30 hover:bg-red-500/10 rounded-lg transition-colors"
+                                >
+                                    <LogOut className="w-4 h-4" /> Выйти из Qwen
+                                </button>
+                            ) : (
+                                <button
+                                    onClick={() => setIsQwenAuthModalOpen(true)}
+                                    className="w-full py-2.5 flex items-center justify-center gap-2 text-sm font-medium text-white bg-cyan-600 hover:bg-cyan-500 rounded-lg transition-colors shadow-lg shadow-cyan-900/20"
+                                >
+                                    <LogIn className="w-4 h-4" /> Войти в Qwen
+                                </button>
+                            )}
+
+                            <p className="text-[11px] text-zinc-500 leading-relaxed">
+                                Использует официальный OAuth Device Flow. Токен хранится в системном Keychain.
+                            </p>
+                        </div>
+                    )}
                 </div>
             )}
 
@@ -583,7 +695,7 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({ onComplete }
                 </button>
                 <button
                     className="flex-1 px-6 py-2 bg-blue-600 hover:bg-blue-500 text-white font-medium rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                    disabled={!selectedProvider}
+                    disabled={!selectedProvider || (selectedProvider === 'qwen' && !qwenCliStatus?.is_authenticated)}
                     onClick={handleSaveProfile}
                 >
                     Сохранить настройки
@@ -821,16 +933,23 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({ onComplete }
     };
 
     return (
-        <div
-            ref={wizardRef}
-            className={`absolute inset-0 z-[100] ${step === 'tour' ? 'bg-transparent pointer-events-none' : 'bg-[#1e1e1e] flex items-center justify-center p-6'} text-white font-sans transition-colors duration-700`}>
-            <div className={`w-full ${step === 'tour' ? 'h-full' : 'max-w-4xl'} relative transition-all duration-500`}>
-                {step === 'welcome' && renderWelcome()}
-                {step === 'environment' && renderEnvironment()}
-                {step === 'llm-setup' && renderLLMSetup()}
-                {step === 'mcp-setup' && renderMCPSetup()}
-                {step === 'tour' && renderTour()}
+        <>
+            <div
+                ref={wizardRef}
+                className={`absolute inset-0 z-[100] ${step === 'tour' ? 'bg-transparent pointer-events-none' : 'bg-[#1e1e1e] flex items-center justify-center p-6'} text-white font-sans transition-colors duration-700`}>
+                <div className={`w-full ${step === 'tour' ? 'h-full' : 'max-w-4xl'} relative transition-all duration-500`}>
+                    {step === 'welcome' && renderWelcome()}
+                    {step === 'environment' && renderEnvironment()}
+                    {step === 'llm-setup' && renderLLMSetup()}
+                    {step === 'mcp-setup' && renderMCPSetup()}
+                    {step === 'tour' && renderTour()}
+                </div>
             </div>
-        </div>
+            <QwenAuthModal
+                isOpen={isQwenAuthModalOpen}
+                onClose={() => setIsQwenAuthModalOpen(false)}
+                onSuccess={handleQwenAuthSuccess}
+            />
+        </>
     );
 };
