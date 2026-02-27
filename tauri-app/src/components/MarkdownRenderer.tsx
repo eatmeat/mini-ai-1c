@@ -14,7 +14,7 @@ interface MarkdownRendererProps {
 }
 
 // Утилита для очистки diff-артефактов и технических фраз
-function cleanDiffArtifacts(content: string): string {
+function cleanDiffArtifacts(content: string, originalCode?: string): string {
     let cleaned = content;
 
     // 0. Очищаем XML-формат вызова инструментов (Qwen / некоторые другие модели)
@@ -50,11 +50,9 @@ function cleanDiffArtifacts(content: string): string {
     // 4. Скрываем завершенные блоки (match 5-10 chevrons)
     cleaned = cleaned.replace(/<{5,10} SEARCH[\s\S]*?>{5,10} REPLACE/g, '');
 
-    // 5. Скрываем незавершенные блоки при стриминге
-    const searchMarker = cleaned.match(/<{5,10} SEARCH/);
-    if (searchMarker && cleaned.includes(searchMarker[0])) {
-        cleaned = cleaned.split(searchMarker[0])[0];
-    }
+    // 5. Скрываем незавершенные блоки при стриминге или обрыве
+    cleaned = cleaned.replace(/<{5,10} SEARCH[\s\S]*?={7}[\s\S]*?(?:\n|$)/g, '');
+    cleaned = cleaned.replace(/<{5,10} SEARCH[\s\S]*?(?:\n|$)/g, '');
 
     // 6. Удаляем одиночные строки из шевронов и маркеры REPLACE/SEARCH
     cleaned = cleaned.replace(/^<{5,10}\s*$/gm, '');
@@ -62,6 +60,31 @@ function cleanDiffArtifacts(content: string): string {
     cleaned = cleaned.replace(/^>{5,10}\s+REPLACE\s*$/gm, '');
     cleaned = cleaned.replace(/^<{5,10}\s+SEARCH\s*$/gm, '');
     cleaned = cleaned.replace(/^={7}\s*$/gm, '');
+
+    // 7. Обработка нового XML формата <diff>
+    if (!originalCode || originalCode.trim().length === 0) {
+        // Если контекста нет, вытаскиваем текст из <replace> и рендерим как обычный блок
+        cleaned = cleaned.replace(/<diff>[\s\S]*?<replace>([\s\S]*?)<\/replace>[\s\S]*?<\/diff>/g, (_, p1) => {
+            return '\n```bsl\n' + p1.trim() + '\n```\n';
+        });
+
+        // Для стриминга: если тег открыт, но не закрыт
+        if (cleaned.includes('<replace>') && !cleaned.includes('</replace>')) {
+            cleaned = cleaned.replace(/<replace>([\s\S]*)$/, (_, p1) => {
+                return '\n```bsl\n' + p1.trim() + '\n```\n';
+            });
+        }
+
+        // Скрываем мусор от <diff> или <search>
+        cleaned = cleaned.replace(/<diff>[\s\S]*?(?:<\/search>|<search>|$)/g, '');
+    } else {
+        // Очищаем XML формат <diff>, так как дифф будет отрендерен DiffViewer'ом
+        cleaned = cleaned.replace(/<diff>[\s\S]*?<\/diff>/g, '');
+        // Очищаем незавершенные XML блоки при стриминге
+        if (cleaned.includes('<diff>') && !cleaned.includes('</diff>')) {
+            cleaned = cleaned.replace(/<diff>[\s\S]*/, '');
+        }
+    }
 
     const hasBlocks = /<{5,10} SEARCH/.test(content);
     const result = cleaned.trim();
@@ -348,7 +371,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({ content, isStre
             rehypePlugins={[rehypeRaw]}
             components={components as any}
         >
-            {cleanDiffArtifacts(content)}
+            {cleanDiffArtifacts(content, originalCode)}
         </ReactMarkdown>
     );
 });

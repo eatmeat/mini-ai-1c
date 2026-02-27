@@ -356,8 +356,8 @@ export function CodeSidePanel({
                         height="100%"
                         language="bsl"
                         theme="vs-dark"
-                        original={localOriginalCode}
-                        modified={modifiedCode}
+                        original={localOriginalCode.replace(/\r\n/g, '\n')}
+                        modified={modifiedCode.replace(/\r\n/g, '\n')}
                         onMount={(editor, monaco) => {
                             registerBSL(monaco);
                             monacoRef.current = monaco;

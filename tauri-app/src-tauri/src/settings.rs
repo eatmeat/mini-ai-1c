@@ -58,7 +58,7 @@ fn default_slash_commands() -> Vec<SlashCommand> {
             command: "описание".to_string(),
             name: "Описание".to_string(),
             description: "Сгенерировать описание процедуры/функции".to_string(),
-            template: "Сгенерируй стандартную шапку описания для этой процедуры/функции:\n```bsl\n{code}\n```".to_string(),
+            template: "Сгенерируй стандартную шапку описания для этой процедуры/функции в формате 1С (только комментарии //, без тегов <Описание>):\n```bsl\n{code}\n```".to_string(),
             is_enabled: true,
             is_system: true,
         },

@@ -27,88 +27,128 @@ function stripMarkdownCodeBlocks(content: string): string {
 }
 
 /**
- * Парсит текст сообщения на блоки изменений
+ * Парсит текст сообщения на блоки изменений с поддержкой незавершенных блоков.
  */
 export function parseDiffBlocks(content: string): DiffBlock[] {
     const blocks: DiffBlock[] = [];
-    // Регулярка теперь более гибкая к пробелам после маркеров
-    const regex = /<<<<<<< SEARCH[\s\t]*\n?([\s\S]*?)=======[\s\t]*\n?([\s\S]*?)>>>>>>> REPLACE/g;
-
-    let match;
     let index = 0;
-    while ((match = regex.exec(content)) !== null) {
-        let search = match[1];
-        const replace = match[2];
 
-        // Попытка извлечь метку строки из блока search (:строка:123 или :line:123)
-        let lineStart: number | undefined;
-        const lineMatch = search.match(/^:(строка|line):(\d+|EOF)\s*-+\s*\n/i);
+    // Сначала парсим новый XML-формат
+    // [ \t]* перед закрывающими тегами обрабатывает случай, когда ИИ делает отступ тегов (напр. "  </search>")
+    const xmlRegex = /<diff>\s*<search>\n?([\s\S]*?)\n?[ \t]*<\/search>\s*<replace>\n?([\s\S]*?)\n?[ \t]*<\/replace>\s*<\/diff>/g;
+    let xmlMatch;
+    while ((xmlMatch = xmlRegex.exec(content)) !== null) {
+        blocks.push(createBlock(
+            xmlMatch[1].split('\n'),
+            xmlMatch[2].split('\n'),
+            index++
+        ));
+    }
 
-        if (lineMatch) {
-            search = search.substring(lineMatch[0].length);
-            if (lineMatch[2] !== 'EOF') {
-                lineStart = parseInt(lineMatch[2], 10);
+    // Удаляем из контента распарсенные XML-блоки, чтобы они не мешали старому парсеру
+    const legacyContent = content.replace(xmlRegex, '');
+
+    const lines = legacyContent.split('\n');
+
+    let mode: 'none' | 'search' | 'replace' = 'none';
+    let searchLines: string[] = [];
+    let replaceLines: string[] = [];
+
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        const trimmed = line.trim();
+
+        if (trimmed.startsWith('<<<<<<< SEARCH')) {
+            // Если мы уже были в блоке, закроем текущий (lenient parsing)
+            if (mode === 'replace' && (searchLines.length > 0 || replaceLines.length > 0)) {
+                blocks.push(createBlock(searchLines, replaceLines, index++));
             }
-        }
-
-        // Важно: мы НЕ делаем trim(), так как отступы в 1С критичны.
-        // Очищаем только системный префикс :line: если он есть.
-        const searchFinal = search;
-        const replaceFinal = replace;
-
-        if (!searchFinal.trim() && !lineMatch) {
-            console.warn('Пустой блок SEARCH найден без указания строки, игнорируем во избежание дублирования');
+            mode = 'search';
+            searchLines = [];
+            replaceLines = [];
             continue;
         }
 
-        // Расчет чистой статистики с использованием diffLines
-        const dLines = diffLines(searchFinal.trim(), replaceFinal.trim(), { ignoreWhitespace: false });
-        let added = 0;
-        let removed = 0;
-        let unchanged = 0;
+        if (trimmed === '=======') {
+            if (mode === 'search') {
+                mode = 'replace';
+            }
+            continue;
+        }
 
-        dLines.forEach(part => {
-            const lines = part.value.split('\n').slice(0, part.value.endsWith('\n') ? -1 : undefined).length;
-            if (part.added) added += lines;
-            else if (part.removed) removed += lines;
-            else unchanged += lines;
-        });
+        if (trimmed.startsWith('>>>>>>> REPLACE')) {
+            if (mode === 'replace') {
+                blocks.push(createBlock(searchLines, replaceLines, index++));
+                mode = 'none';
+                searchLines = [];
+                replaceLines = [];
+            }
+            continue;
+        }
 
-        // "Modified" считаем как пересечение удаленных и добавленных (где строка была заменена)
-        let modified = Math.min(added, removed);
-        added -= modified;
-        removed -= modified;
+        if (mode === 'search') {
+            searchLines.push(line);
+        } else if (mode === 'replace') {
+            replaceLines.push(line);
+        }
+    }
 
-
-        blocks.push({
-            search: searchFinal,
-            replace: replaceFinal,
-            lineStart,
-            status: 'pending',
-            index: index++,
-            stats: { added, removed, modified }
-        });
+    // В конце текста, если мы остались в режиме replace, добавляем блок
+    if (mode === 'replace' && (searchLines.length > 0 || replaceLines.length > 0)) {
+        blocks.push(createBlock(searchLines, replaceLines, index++));
     }
 
     return blocks;
 }
 
 /**
- * Применяет изменения к исходному коду.
- * Стратегия:
- * 1. Ищет точное совпадение блока SEARCH.
- * 2. Если не найдено -> возвращает как есть с предупреждением.
- * @param originalCode Исходный код
- * @param diffContent Строка с диффами (или массив блоков)
- * @param selectedIndices Массив индексов блоков, которые нужно применить. Если не передан - применяются все.
+ * Вспомогательная функция для создания блока с постобработкой
  */
+function createBlock(searchLines: string[], replaceLines: string[], index: number): DiffBlock {
+    let search = searchLines.join('\n');
+    let replace = replaceLines.join('\n');
+
+    // Попытка извлечь метку строки из блока search (:строка:123 или :line:123)
+    let lineStart: number | undefined;
+    const lineMatch = search.match(/^:(строка|line):(\d+|EOF)\s*-+\s*\n/i);
+
+    if (lineMatch) {
+        search = search.substring(lineMatch[0].length);
+        if (lineMatch[2] !== 'EOF') {
+            lineStart = parseInt(lineMatch[2], 10);
+        }
+    }
+
+    // Расчет статистики
+    const dLines = diffLines(search.trim(), replace.trim(), { ignoreWhitespace: false });
+    let added = 0, removed = 0;
+    dLines.forEach(part => {
+        const count = part.value.split('\n').filter(l => l.length > 0).length;
+        if (part.added) added += count;
+        else if (part.removed) removed += count;
+    });
+    let modified = Math.min(added, removed);
+    added -= modified;
+    removed -= modified;
+
+    return {
+        search,
+        replace,
+        lineStart,
+        status: 'pending',
+        index,
+        stats: { added, removed, modified }
+    };
+}
+
 export function applyDiff(originalCode: string, diffContent: string | DiffBlock[], selectedIndices?: number[]): string {
     if (!originalCode) return typeof diffContent === 'string' ? diffContent : originalCode;
 
     const blocks = typeof diffContent === 'string' ? parseDiffBlocks(diffContent) : diffContent;
     if (blocks.length === 0) return originalCode;
 
-    let result = originalCode;
+    const useCRLF = originalCode.includes('\r\n');
+    let result = originalCode.replace(/\r\n/g, '\n');
 
     for (let i = 0; i < blocks.length; i++) {
         // Если указан фильтр и текущий блок не выбран - пропускаем
@@ -118,74 +158,78 @@ export function applyDiff(originalCode: string, diffContent: string | DiffBlock[
 
         const block = blocks[i];
 
-        // 1. Точный поиск
-        // Нормализуем окончания строк для кросс-платформенности
-        const normalizedOriginal = result.replace(/\r\n/g, '\n');
         let normalizedSearch = block.search.replace(/\r\n/g, '\n');
+        let normalizedReplace = block.replace.replace(/\r\n/g, '\n');
 
-        // Пробуем найти блок
-        if (normalizedOriginal.includes(normalizedSearch)) {
-            result = normalizedOriginal.replace(normalizedSearch, block.replace);
+        // 1. Точный поиск
+        if (result.includes(normalizedSearch)) {
+            result = result.replace(normalizedSearch, normalizedReplace);
             continue;
         }
 
-        // 2. Если не нашли, и поиск заканчивается переводом строки (часто бывает из-за формата блока)
-        // пробуем сопоставить БЕЗ него (для случая конца файла - EOF)
+        // 2. Если не нашли, и поиск заканчивается переводом строки
         if (normalizedSearch.endsWith('\n')) {
             const trimmedSearch = normalizedSearch.slice(0, -1);
-            if (trimmedSearch && normalizedOriginal.endsWith(trimmedSearch)) {
+            if (trimmedSearch && result.endsWith(trimmedSearch)) {
                 // Если совпало в конце файла, заменяем
-                const lastIndex = normalizedOriginal.lastIndexOf(trimmedSearch);
+                const lastIndex = result.lastIndexOf(trimmedSearch);
                 if (lastIndex !== -1) {
-                    result = normalizedOriginal.slice(0, lastIndex) + block.replace;
+                    result = result.slice(0, lastIndex) + normalizedReplace;
                     continue;
                 }
             }
 
             // Также пробуем просто найти trimmedSearch где угодно, если он уникальный
-            const occurrences = normalizedOriginal.split(trimmedSearch).length - 1;
+            const occurrences = result.split(trimmedSearch).length - 1;
             if (occurrences === 1) {
-                result = normalizedOriginal.replace(trimmedSearch, block.replace);
+                result = result.replace(trimmedSearch, normalizedReplace);
                 continue;
             }
         }
 
-        // 3. Совсем суровый вариант: убираем пробелы в конце каждой строки поиска (иногда ИИ их добавляет)
-        const looseSearch = normalizedSearch.split('\n').map(l => l.trimEnd()).join('\n');
-        const looseOriginal = normalizedOriginal.split('\n').map(l => l.trimEnd()).join('\n');
+        // 3. Совсем суровый вариант: убираем пробелы в конце каждой строки поиска
+        const normalizeLine = (l: string) => l.trimEnd().replace(/^\s+/, '');
+        const looseSearch = normalizedSearch.split('\n').map(normalizeLine).join('\n');
+        const looseOriginalLines = result.split('\n').map(normalizeLine);
+        const looseOriginal = looseOriginalLines.join('\n');
 
         if (looseOriginal.includes(looseSearch)) {
             console.log('[applyDiff] Найдено совпадение через loose-matching');
 
-            // Находим индекс в "расслабленном" тексте
-            const looseIndex = looseOriginal.indexOf(looseSearch);
-            if (looseIndex !== -1) {
-                // Пытаемся спроецировать этот индекс на оригинальный текст. 
-                // Так как trimEnd() только убирает символы в конце строк, 
-                // мы можем найти соответствующие границы строк в оригинале.
+            const searchLinesCount = normalizedSearch.split('\n').length;
+            const looseSearchLines = looseSearch.split('\n');
 
-                const originalLines = normalizedOriginal.split('\n');
-                const searchLinesCount = looseSearch.split('\n').length;
-                const looseLinesBefore = looseOriginal.substring(0, looseIndex).split('\n');
-                const startLineIdx = looseLinesBefore.length - 1;
+            let replaced = false;
+            // Поиск начала блока в массиве нормализованных строк
+            for (let startIdx = 0; startIdx <= looseOriginalLines.length - searchLinesCount; startIdx++) {
+                let match = true;
+                for (let j = 0; j < searchLinesCount; j++) {
+                    if (looseOriginalLines[startIdx + j] !== looseSearchLines[j]) {
+                        match = false;
+                        break;
+                    }
+                }
 
-                // Проверяем, что блок действительно соответствует этим строкам (с точностью до trimEnd)
-                const candidateLines = originalLines.slice(startLineIdx, startLineIdx + searchLinesCount);
-                const candidateContent = candidateLines.join('\n');
-
-                if (candidateContent.split('\n').map(l => l.trimEnd()).join('\n') === looseSearch) {
+                if (match) {
                     // Успешная проекция! Заменяем эти строки.
-                    const head = originalLines.slice(0, startLineIdx).join('\n');
-                    const tail = originalLines.slice(startLineIdx + searchLinesCount).join('\n');
+                    const originalLines = result.split('\n');
+                    const head = originalLines.slice(0, startIdx).join('\n');
+                    const tail = originalLines.slice(startIdx + searchLinesCount).join('\n');
 
-                    result = (head ? head + '\n' : '') + block.replace + (tail ? '\n' + tail : '');
-                    continue;
+                    result = (head ? head + '\n' : '') + normalizedReplace + (tail ? '\n' + tail : '');
+                    replaced = true;
+                    break;
                 }
             }
+            if (replaced) continue;
         }
 
         // Если не нашли - выводим варнинг
         console.warn('Не удалось найти блок для замены (индекс ' + i + '):', block.search);
+    }
+
+    if (useCRLF) {
+        result = result.replace(/\n/g, '\r\n');
     }
 
     return result;
@@ -195,7 +239,7 @@ export function applyDiff(originalCode: string, diffContent: string | DiffBlock[
  * Проверяет, содержит ли сообщение блоки diff
  */
 export function hasDiffBlocks(content: string): boolean {
-    return /<<<<<<< SEARCH/.test(content);
+    return /<<<<<<< SEARCH/.test(content) || /<diff>/.test(content);
 }
 
 /**
@@ -224,8 +268,10 @@ export function hasApplicableDiffBlocks(originalCode: string, content: string): 
         }
 
         // 3. Loose matching
-        const looseSearch = normalizedSearch.split('\n').map(l => l.trimEnd()).join('\n');
-        const looseOriginal = normalizedOriginal.split('\n').map(l => l.trimEnd()).join('\n');
+        const normalizeLine = (l: string) => l.trimEnd().replace(/^\s+/, '');
+        const looseSearch = normalizedSearch.split('\n').map(normalizeLine).join('\n');
+        const looseOriginalLines = normalizedOriginal.split('\n').map(normalizeLine);
+        const looseOriginal = looseOriginalLines.join('\n');
         if (looseOriginal.includes(looseSearch)) return true;
 
         return false;
@@ -236,7 +282,13 @@ export function hasApplicableDiffBlocks(originalCode: string, content: string): 
  * Очищает сообщение от технических блоков diff для отображения (если нужно скрыть)
  */
 export function cleanDiffArtifacts(content: string): string {
-    return content.replace(/<<<<<<< SEARCH[\s\S]*?>>>>>>> REPLACE/g, '').trim();
+    // Очищаем как завершенные, так и незавершенные блоки
+    let cleaned = content.replace(/<<<<<<< SEARCH[\s\S]*?>>>>>>> REPLACE/g, '');
+    cleaned = cleaned.replace(/<<<<<<< SEARCH[\s\S]*?=======[\s\S]*?(?:\n|$)/g, '');
+    // Очищаем XML формат
+    cleaned = cleaned.replace(/<diff>[\s\S]*?<\/diff>/g, '');
+    cleaned = cleaned.replace(/<diff>[\s\S]*?(?:\n|$)/g, '');
+    return cleaned.trim();
 }
 
 /**
@@ -296,8 +348,11 @@ export function extractDisplayCode(originalCode: string, response: string): stri
  * Удаляет все блоки кода и diff-блоки из сообщения, оставляя только текст.
  */
 export function stripCodeBlocks(content: string): string {
-    // 1. Удаляем Diff-блоки
+    // 1. Удаляем Diff-блоки (полные и частичные)
     let stripped = content.replace(/<<<<<<< SEARCH[\s\S]*?>>>>>>> REPLACE/g, '');
+    stripped = stripped.replace(/<<<<<<< SEARCH[\s\S]*?=======[\s\S]*?(?:\n|$)/g, '');
+    stripped = stripped.replace(/<diff>[\s\S]*?<\/diff>/g, '');
+    stripped = stripped.replace(/<diff>[\s\S]*?(?:\n|$)/g, '');
 
     // 2. Удаляем блоки кода
     stripped = stripped.replace(/```(?:bsl|1c)([\s\S]*?)```/gi, '');

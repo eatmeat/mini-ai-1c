@@ -48,3 +48,6 @@ scripts/
 .claude/settings.local.json
 
 docs/
+CLAUDE.md
+.mcp.json
+memory/

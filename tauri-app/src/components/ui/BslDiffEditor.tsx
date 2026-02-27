@@ -12,15 +12,19 @@ interface BslDiffEditorProps {
     hideBorder?: boolean;
 }
 
-export function BslDiffEditor({ 
-    original, 
-    modified, 
-    height = '400px', 
-    readOnly = true, 
-    loading, 
-    className, 
-    hideBorder = false 
+export function BslDiffEditor({
+    original,
+    modified,
+    height = '400px',
+    readOnly = true,
+    loading,
+    className,
+    hideBorder = false
 }: BslDiffEditorProps) {
+    // Normalize line endings to LF to prevent Monaco from highlighting the entire file as changed
+    const normalizedOriginal = original ? original.replace(/\r\n/g, '\n') : '';
+    const normalizedModified = modified ? modified.replace(/\r\n/g, '\n') : '';
+
     // Register BSL language once
     useEffect(() => {
         loader.init().then(monaco => {
@@ -43,8 +47,8 @@ export function BslDiffEditor({
                 height="100%"
                 language="bsl"
                 theme="vs-dark"
-                original={original}
-                modified={modified}
+                original={normalizedOriginal}
+                modified={normalizedModified}
                 loading={loading || defaultLoading}
                 options={{
                     readOnly,

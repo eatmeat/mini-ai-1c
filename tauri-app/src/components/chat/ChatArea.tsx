@@ -277,7 +277,7 @@ export function ChatArea({
         // Автоматически применяем дифф-блоки последнего ответа ассистента
         if (!isLoading && messages.length > 0) {
             const lastMsg = messages[messages.length - 1];
-            const currentOriginal = contextCode || modifiedCode || "";
+            const currentOriginal = originalCode || modifiedCode || "";
 
             // Проверяем: есть ли маркеры SEARCH
             console.log(`[ChatArea:diag] isLoading=${isLoading}, role=${lastMsg.role}, contextLen=${currentOriginal.length}, msgContentLen=${(lastMsg.content || '').length}`);
@@ -684,8 +684,11 @@ export function ChatArea({
                                                         );
                                                     }
 
+                                                    const currentOriginalCode = contextCode || modifiedCode || "";
+                                                    const hasContext = currentOriginalCode.trim().length > 0;
                                                     const isDiffActive = activeDiffContent && (activeDiffContent === msg.content || msg.content.includes(activeDiffContent.substring(0, 50)));
-                                                    const shouldShowBanner = hasDiffBlocks(msg.content) &&
+                                                    const shouldShowBanner = hasContext &&
+                                                        hasDiffBlocks(msg.content) &&
                                                         parseDiffBlocks(msg.content).length > 0 &&
                                                         !dismissedDiffMessages.has(msgKey) &&
                                                         isDiffActive;
@@ -835,8 +838,8 @@ export function ChatArea({
                                                 {activeProfile?.name || 'Выберите профиль'}
                                                 {isQwen && activeProfile && cliStatuses[activeProfile.id]?.is_authenticated && cliStatuses[activeProfile.id].usage && (
                                                     <span className={`text-[9px] font-mono px-1.5 py-0.5 rounded-full border ${cliStatuses[activeProfile.id].usage!.requests_limit > 0 && cliStatuses[activeProfile.id].usage!.requests_used / cliStatuses[activeProfile.id].usage!.requests_limit > 0.8
-                                                            ? 'bg-amber-500/15 text-amber-400 border-amber-500/30'
-                                                            : 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
+                                                        ? 'bg-amber-500/15 text-amber-400 border-amber-500/30'
+                                                        : 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
                                                         }`}>
                                                         {cliStatuses[activeProfile.id].usage!.requests_used}{cliStatuses[activeProfile.id].usage!.requests_limit > 0 ? `/${cliStatuses[activeProfile.id].usage!.requests_limit}` : ''}
                                                     </span>

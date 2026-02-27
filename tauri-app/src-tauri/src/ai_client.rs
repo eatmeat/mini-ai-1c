@@ -153,79 +153,62 @@ const CODE_PRESERVATION_RULES: &str = r#"
 /// Константа с инструкциями для diff-формата (Search/Replace)
 /// Константа с инструкциями для diff-формата (Search/Replace)
 const DIFF_FORMAT_INSTRUCTIONS: &str = r#"
-IMPORTANT: You are a "Senior 1C Developer" working in a legacy codebase.
-Your goal is to make **Targeted Edits** using the SEARCH/REPLACE block format.
+IMPORTANT: You are an expert 1C Developer.
+Your goal is to make **Targeted Edits** using strictly XML-based diff format.
 
-# FORMAT RULES:
-1. Use the following block structure for EVERY change:
-<<<<<<< SEARCH
+[RULES]
+1. OUTPUT_FORMAT: You MUST ONLY output your modifications using the following XML structure for EVERY change:
+<diff>
+  <search>
 [Exact content to be replaced, including indentation]
-=======
+  </search>
+  <replace>
 [New content to replace with]
->>>>>>> REPLACE
+  </replace>
+</diff>
 
-2. **SEARCH BLOCK RULES (CRITICAL):**
-   - Must contain **COMPLETE LINES** of code. Do not start/end in the middle of a line.
-   - Must match the original file **EXACTLY** (character-for-character, space-for-space).
-   - Must include enough context (2-3 lines before/after) to be unique.
-   - If you want to *add* code, search for the line *before* insertion point, and include it in both SEARCH and REPLACE blocks.
+2. SEARCH_BLOCK_RULES (CRITICAL):
+   - The `<search>` block must contain **COMPLETE LINES** of code. Do not start/end in the middle of a line.
+   - It must match the original file **EXACTLY** (character-for-character, space-for-space).
+   - It must include enough context (2-3 lines before/after) to be unique.
+   - To ADD code, search for the line before the insertion point and include it in both `<search>` and `<replace>`.
 
-3. **STRICT MODIFICATION RULES:**
-   - **SCOPE**: Modify ONLY the lines you are actively requested to change.
-   - **FORBIDDEN**:
-     - Do NOT rewrite entire functions unless requested.
-     - Do NOT change logical flow, optimize algorithms, or replace working loops with queries unless asked.
-     - Do NOT fix typos in variable names (e.g. `Задолжность` -> `Задолженность`) unless explicitly requested, as this might break references elsewhere.
-     - Do NOT extract numbers into variables unless explicitly requested.
+3. STRICT_MODIFICATION_RULES:
+   - Modiffy ONLY the lines you are actively requested to change.
+   - PRESERVE the original logic, variable names, and comments of unmodified code.
+   - Do NOT fix typos in variable names unless explicitly requested.
 
-4. **BLOCK SPLITTING RULES (CRITICAL):**
-   - Break large SEARCH/REPLACE blocks into a series of SMALLER blocks that each change a distinct small portion of the file.
-   - Include JUST the changing lines, and a few (2-3) surrounding lines if needed for uniqueness.
-   - **DO NOT include long runs (e.g. 5+ lines) of unchanging lines in SEARCH blocks**.
-   - If changing multiple areas, provide multiple SEARCH/REPLACE blocks in the order they appear in the file.
+4. BLOCK_SPLITTING_RULES:
+   - Break large changes into a series of SMALLER `<diff>` blocks that each change a distinct small portion.
+   - DO NOT include long runs (e.g. 5+ lines) of unchanging lines in `<search>` blocks.
 
-5. **OUTPUT FORMAT (CRITICAL):**
-   - Respond ONLY with a brief text explanation and the SEARCH/REPLACE blocks.
-   - **START your response immediately with `<<<<<<< SEARCH` if no explanation is needed.**
-   - **FORBIDDEN**: Meta-talk like "Ниже приведен код...", "Вот исправления...".
-   - **🚫 CRITICAL: EVERY block MUST start with `<<<<<<< SEARCH`. NEVER start a block with `=======` or `>>>>>>> REPLACE`.** Without the `<<<<<<< SEARCH` header, the diff block is invalid and will be ignored.
+5. RESPONSE_STRUCTURE:
+   - Respond ONLY with a brief text explanation and the `<diff>` blocks.
+   - NEVER start a diff block without `<diff><search>`.
+   - Ignore the format of previous answers in this chat. For the CURRENT task, you MUST wrap the result in the `<diff>` block.
 
-6. **EOF RULE (COMPLETING CODE):**
-   - If the code ends abruptly in the middle of a function or loop, you MUST complete it.
-   - The SEARCH block must contain the last 2-3 lines of the truncated file.
-   - The REPLACE block MUST contain those same lines PLUS the logically required closing keywords (e.g., `EndIf;`, `EndDo;`, `EndFunction`, `Return ...;`) and any missing logic.
-   - **CRITICAL**: Do NOT just repeat the SEARCH block. Your goal is to make the file syntactically and logically complete.
-   - **EOF EXAMPLE:**
-     If file ends with: `If X > 0`
-     Your block MUST be:
-     <<<<<<< SEARCH
-     If X > 0
-     =======
-     If X > 0 Then
-         Return True;
-     EndIf;
-     >>>>>>> REPLACE
+6. EOF_RULE_COMPLETING_CODE:
+   - If the code ends abruptly, you MUST complete it logically within the replace block.
+[/RULES]
 "#;
 
 const TWO_STEP_PLANNING_RULES: &str = r#"
 === TWO-STEP PLANNING AND LANGUAGE RULES ===
 
-1. AUTOMATIC PLANNING (CRITICAL):
-   - For COMPLEX tasks (multiple steps, tool usage, architectural questions), you MUST start your response with a `<thinking>` tag.
-   - For SIMPLE tasks (greetings, simple questions, single-line code changes), you MAY skip the `<thinking>` tag and reply directly.
-   - You decide whether to plan or not based on the complexity of the user's request.
+[RULES]
+1. AUTOMATIC_PLANNING:
+   - For COMPLEX tasks (multiple steps), you MUST start your response with a `<think>` tag.
+   - For SIMPLE tasks, you MAY skip the `<think>` tag and reply directly.
 
-2. LANGUAGE RULES (STRICT COMPLIANCE):
-   - THE `<thinking>` BLOCK MUST BE IN ENGLISH regardless of the user's language. This is for internal logic and better reasoning.
-   - THE FINAL RESPONSE (AFTER `</thinking>` OR DIRECTLY) MUST BE IN THE USER'S LANGUAGE.
-   - If the user's request contains Cyrillic (Russian) characters, the final response MUST be in RUSSIAN.
-   - Default to RUSSIAN for the final response unless the user specifically asks in another language.
+2. LANGUAGE:
+   - The `<think>` BLOCK MUST BE IN ENGLISH for better reasoning.
+   - The FINAL RESPONSE (AFTER `</think>` OR DIRECTLY) MUST BE IN THE USER'S LANGUAGE.
+   - If the user writes in Russian — answer in Russian.
 
-3. PLANNING CONTENT (INSIDE `<thinking>`):
-   - Analyze the goal.
-   - List the tools (MCP) you intend to use.
-   - Outline the steps to reach the result.
-   - Do NOT include final code or final answer inside `<thinking>`.
+3. THINKING_CONTENT:
+   - Analyze the goal inside `<think>`.
+   - Do NOT include final code inside `<think>`.
+[/RULES]
 "#;
 
 /// Helper to detect target language based on message content
@@ -251,6 +234,32 @@ fn detect_target_lang(messages: &[ApiMessage]) -> String {
     "Russian".to_string() // Default to Russian (system language)
 }
 
+/// Проверяет наличие BSL-кода в контексте диалога.
+/// Если кода нет — инструкции дифф-формата не включаются в system prompt.
+fn has_code_context(messages: &[ApiMessage]) -> bool {
+    for msg in messages {
+        if let Some(content) = &msg.content {
+            // Явные BSL-блоки кода
+            if content.contains("```bsl") || content.contains("```1c") {
+                return true;
+            }
+            // Характерные BSL-ключевые слова (≥2 разных → значимый фрагмент кода)
+            let bsl_markers = [
+                "КонецФункции",
+                "КонецПроцедуры",
+                "КонецЕсли",
+                "Функция ",
+                "Процедура ",
+            ];
+            let count = bsl_markers.iter().filter(|&&m| content.contains(m)).count();
+            if count >= 2 {
+                return true;
+            }
+        }
+    }
+    false
+}
+
 /// Get dynamic system prompt based on available tools
 pub fn get_system_prompt(available_tools: &[ToolInfo], messages: &[ApiMessage]) -> String {
     let settings = load_settings();
@@ -271,11 +280,30 @@ pub fn get_system_prompt(available_tools: &[ToolInfo], messages: &[ApiMessage]) 
         },
     }
     
-    // 2. Базовый промпт - всегда используем DIFF_FORMAT_INSTRUCTIONS (SEARCH/REPLACE)
-    // согласно требованию максимального упрощения и надежности.
-    let code_rules = DIFF_FORMAT_INSTRUCTIONS;
+    // 2. Определяем формат ответа в зависимости от наличия BSL-кода в диалоге.
+    // Если кода нет (например, описание отправлено хоткеем как текст без явной загрузки)
+    // — не включаем DIFF_FORMAT_INSTRUCTIONS, модель отвечает свободным текстом.
+    let has_code = has_code_context(messages);
+    let code_rules = if has_code { DIFF_FORMAT_INSTRUCTIONS } else { "" };
     let planning_rules = TWO_STEP_PLANNING_RULES;
-    
+
+    // Инструкции режима редактирования — зависят от наличия кода в контексте
+    let edit_mode_instructions = if has_code {
+        r#"РЕЖИМ ОТВЕТА НА ВОПРОСЫ (СТРОГИЙ ПРИОРИТЕТ):
+- Если запрос пользователя является ВОПРОСОМ (содержит слова: "что делает", "объясни", "как работает", "расскажи", "зачем", "почему", "что такое", "как используется") — ОТВЕЧАЙ ТОЛЬКО ТЕКСТОМ.
+- В режиме вопроса ЗАПРЕЩЕНО использовать блоки SEARCH/REPLACE.
+- В режиме вопроса ЗАПРЕЩЕНО вносить ЛЮБЫЕ изменения в код, даже "очевидные улучшения" или исправления.
+- Изменения кода (SEARCH/REPLACE) — если запрос содержит явное действие: "исправь", "добавь", "измени", "перепиши", "удали", "создай", "реализуй", "оптимизируй", **"допиши"**, **"заверши"**, "дополни".
+- ПУСТОЙ МОДУЛЬ: Если исходный код BSL пуст или содержит только маркер/комментарии, а пользователь просит "добавить", "создать" или "написать" — генерируй ПОЛНЫЙ текст модуля с нуля в блоке ```bsl. Не пытайся использовать SEARCH/REPLACE для абсолютно пустого файла.
+
+**КРИТИЧЕСКИ ВАЖНО**: Если тебе предоставлен исходный код (контекст) и запрошено изменение — используй SEARCH/REPLACE. НЕ форматируй изменённый код в ```bsl``` блоки вместо SEARCH/REPLACE."#
+    } else {
+        r#"РЕЖИМ ОТВЕТА (КОНТЕКСТ КОДА ОТСУТСТВУЕТ):
+- В текущем диалоге нет загруженного файла для редактирования.
+- Отвечай ТОЛЬКО текстом или блоком ```bsl при генерации нового кода с нуля.
+- ЗАПРЕЩЕНО использовать формат SEARCH/REPLACE — он не применим без исходного кода."#
+    };
+
     prompt.push_str(&format!(
         r#"Ты - AI-ассистент для разработки на платформе 1С:Предприятие.
 
@@ -301,17 +329,22 @@ pub fn get_system_prompt(available_tools: &[ToolInfo], messages: &[ApiMessage]) 
 - ЗАПРЕЩЕНО изменять код за пределами запрашиваемых модификаций.
 - НЕ исправляй опечатки в переменных, если об этом не просили, так как это нарушит ссылки в других модулях.
 
-РЕЖИМ ОТВЕТА НА ВОПРОСЫ (СТРОГИЙ ПРИОРИТЕТ):
-- Если запрос пользователя является ВОПРОСОМ (содержит слова: "что делает", "объясни", "как работает", "расскажи", "зачем", "почему", "что такое", "как используется") — ОТВЕЧАЙ ТОЛЬКО ТЕКСТОМ.
-- В режиме вопроса ЗАПРЕЩЕНО использовать блоки SEARCH/REPLACE.
-- В режиме вопроса ЗАПРЕЩЕНО вносить ЛЮБЫЕ изменения в код, даже "очевидные улучшения" или исправления.
-- Изменения кода (SEARCH/REPLACE) — если запрос содержит явное действие: "исправь", "добавь", "измени", "перепиши", "удали", "создай", "реализуй", "оптимизируй", **"допиши"**, **"заверши"**, "дополни".
-- ПУСТОЙ МОДУЛЬ: Если исходный код BSL пуст или содержит только маркер/комментарии, а пользователь просит "добавить", "создать" или "написать" — генерируй ПОЛНЫЙ текст модуля с нуля в блоке ```bsl. Не пытайся использовать SEARCH/REPLACE для абсолютно пустого файла.
+{}
 
-**КРИТИЧЕСКИ ВАЖНО**: Если тебе предоставлен исходный код (контекст) и запрошено изменение — используй SEARCH/REPLACE. НЕ форматируй изменённый код в ```bsl``` блоки вместо SEARCH/REPLACE.
+ФИНАЛЬНОЕ НАПОМИНАНИЕ: твой ответ НА РУССКОМ ЯЗЫКЕ!
 
-ФИНАЛЬНОЕ НАПОМИНАНИЕ: твой ответ НА РУССКОМ ЯЗЫКЕ!"#,
-        planning_rules, target_lang, target_lang, code_rules
+=== ФОРМАТ ДОКУМЕНТАЦИИ (КРИТИЧЕСКИ ВАЖНО) ===
+- При генерации описаний (шапок) процедур и функций используй ТОЛЬКО стандартный формат комментариев 1С (символы //).
+- КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО использовать любые XML-подобные теги, такие как `<ОписаниеФункции>`, `<Параметры>`, `<ВозвращаемоеЗначение>` и т.д.
+- ШАБЛОН ОПИСАНИЯ:
+// Рассчитывает...
+//
+// Параметры:
+//   ИмяПараметра - Тип - Описание
+//
+// Возвращаемое значение:
+//   Тип - Описание"#,
+        planning_rules, target_lang, target_lang, code_rules, edit_mode_instructions
     ));
 
     // 3. Инструкции для маркировки (только если включено или в режиме Maintenance)
@@ -607,8 +640,11 @@ pub async fn stream_chat_completion(
             return Err("Qwen CLI: Токен истек. Требуется повторная авторизация".to_string());
         }
 
-        // Use resource_url from token if available, else fallback to portal.qwen.ai
-        let base = if let Some(ru) = resource_url.as_deref().filter(|s| !s.is_empty()) {
+        // Use resource_url from token if available and not a commercial DashScope endpoint,
+        // else fallback to portal.qwen.ai (free tier)
+        let base = if let Some(ru) = resource_url.as_deref().filter(|s| {
+            !s.is_empty() && !s.contains("dashscope") && !s.contains("aliyun")
+        }) {
             format!("https://{}/v1", ru)
         } else {
             "https://portal.qwen.ai/v1".to_string()
@@ -782,6 +818,23 @@ pub async fn stream_chat_completion(
             for line in event.lines() {
                 if let Some(data) = line.strip_prefix("data: ") {
                     if data == "[DONE]" {
+                        // Flush any remaining content in buffers
+                        if !content_search_temp.is_empty() {
+                            if is_thinking {
+                                let _ = app_handle.emit("chat-thinking-chunk", content_search_temp.clone());
+                            } else if !is_qwen_fn {
+                                full_content.push_str(&content_search_temp);
+                                let _ = app_handle.emit("chat-chunk", content_search_temp.clone());
+                            }
+                            content_search_temp.clear();
+                        }
+                        // If we have an incomplete Qwen function, add it to full content so it's not lost
+                        if is_qwen_fn && !qwen_fn_buf.is_empty() {
+                            full_content.push_str(&qwen_fn_buf);
+                            let _ = app_handle.emit("chat-chunk", qwen_fn_buf.clone());
+                            qwen_fn_buf.clear();
+                        }
+
                         crate::app_log!("[AI][DIAG] [DONE] received. full_content.len()={}, tool_calls={}, qwen_fn_buf_len={}",
                             full_content.len(), accumulated_tool_calls.len(), qwen_fn_buf.len());
                         if !full_content.is_empty() {
@@ -999,6 +1052,22 @@ pub async fn stream_chat_completion(
                 }
             }
         }
+    }
+
+    // FINAL FLUSH: ensure everything from buffers is in full_content if stream ended unexpectedly
+    if !content_search_temp.is_empty() {
+        if is_thinking {
+            let _ = app_handle.emit("chat-thinking-chunk", content_search_temp.clone());
+        } else if !is_qwen_fn {
+            full_content.push_str(&content_search_temp);
+            let _ = app_handle.emit("chat-chunk", content_search_temp.clone());
+        }
+        content_search_temp.clear();
+    }
+    if is_qwen_fn && !qwen_fn_buf.is_empty() {
+        full_content.push_str(&qwen_fn_buf);
+        let _ = app_handle.emit("chat-chunk", qwen_fn_buf.clone());
+        qwen_fn_buf.clear();
     }
     
     let total_gen_duration = start_gen_time.elapsed().as_millis();

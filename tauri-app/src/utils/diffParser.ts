@@ -39,67 +39,85 @@ export interface DiffParseResult {
 export function parseDiffBlocks(content: string): DiffParseResult {
     const changes: CodeChange[] = [];
     const errors: string[] = [];
-    
+
     // Регулярное выражение для поиска diff-блоков
     // Поддерживает как русский (:строка:), так и английский (:line:) формат
     const regex = /<<<<<<< SEARCH\n:строка:(\d+|EOF)\n-------\n([\s\S]*?)\n=======\n([\s\S]*?)\n>>>>>>> REPLACE/g;
     const regexEn = /<<<<<<< SEARCH\n:line:(\d+|EOF)\n-------\n([\s\S]*?)\n=======\n([\s\S]*?)\n>>>>>>> REPLACE/g;
-    
+    const xmlRegex = /<diff>\s*<search>\n?([\s\S]*?)\n?<\/search>\s*<replace>\n?([\s\S]*?)\n?<\/replace>\s*<\/diff>/g;
+
     let match;
     let blockIndex = 0;
-    
+
+    // Парсим блоки в XML формате
+    while ((match = xmlRegex.exec(content)) !== null) {
+        blockIndex++;
+        const search = match[1];
+        const replace = match[2];
+
+        if (!search.trim()) {
+            errors.push(`Блок #${blockIndex}: пустой блок <search>`);
+            continue;
+        }
+
+        changes.push({
+            search: search.trim(),
+            replace: replace.trim()
+        });
+    }
+
     // Парсим блоки в русском формате
     while ((match = regex.exec(content)) !== null) {
         blockIndex++;
         const lineStartStr = match[1];
         const search = match[2];
         const replace = match[3];
-        
+
         if (!search.trim()) {
             errors.push(`Блок #${blockIndex}: пустой блок SEARCH`);
             continue;
         }
-        
+
         const lineStart = lineStartStr === 'EOF' ? Infinity : parseInt(lineStartStr, 10);
-        
+
         if (lineStart !== Infinity && (isNaN(lineStart) || lineStart < 1)) {
             errors.push(`Блок #${blockIndex}: некорректный номер строки "${lineStartStr}"`);
             continue;
         }
-        
+
         changes.push({
             lineStart,
             search: search.trim(),
             replace: replace.trim()
         });
     }
-    
+
     // Парсим блоки в английском формате
     while ((match = regexEn.exec(content)) !== null) {
         blockIndex++;
         const lineStartStr = match[1];
         const search = match[2];
         const replace = match[3];
-        
+
         if (!search.trim()) {
             errors.push(`Block #${blockIndex}: empty SEARCH block`);
             continue;
         }
-        
+
         const lineStart = lineStartStr === 'EOF' ? Infinity : parseInt(lineStartStr, 10);
-        
+
         if (lineStart !== Infinity && (isNaN(lineStart) || lineStart < 1)) {
             errors.push(`Block #${blockIndex}: invalid line number "${lineStartStr}"`);
             continue;
         }
-        
+
         changes.push({
             lineStart,
             search: search.trim(),
             replace: replace.trim()
         });
     }
-    
+
     return {
         changes,
         hasErrors: errors.length > 0,
@@ -116,7 +134,7 @@ export function parseDiffBlocks(content: string): DiffParseResult {
 export function hasDiffBlocks(content: string): boolean {
     const regex = /<<<<<<< SEARCH\n:строка:(\d+|EOF)\n-------/;
     const regexEn = /<<<<<<< SEARCH\n:line:(\d+|EOF)\n-------/;
-    return regex.test(content) || regexEn.test(content);
+    return regex.test(content) || regexEn.test(content) || /<diff>/.test(content);
 }
 
 /**
@@ -127,7 +145,7 @@ export function hasDiffBlocks(content: string): boolean {
  * @returns Объект с результатом применения и информацией об ошибках
  */
 export function applyDiffChanges(
-    originalCode: string, 
+    originalCode: string,
     changes: CodeChange[]
 ): { result: string; success: boolean; appliedCount: number; failedChanges: number; errors: string[] } {
     if (!changes.length) {
@@ -139,18 +157,18 @@ export function applyDiffChanges(
             errors: []
         };
     }
-    
+
     let result = originalCode;
     let appliedCount = 0;
     let failedChanges = 0;
     const errors: string[] = [];
-    
+
     // Сортируем изменения по убыванию номера строки для корректного применения
     // (чтобы изменения в начале файла не смещали позиции изменений в конце)
-    const sortedChanges = [...changes].sort((a, b) => 
+    const sortedChanges = [...changes].sort((a, b) =>
         (b.lineStart || 0) - (a.lineStart || 0)
     );
-    
+
     for (const change of sortedChanges) {
         if (change.lineStart === Infinity) {
             // Добавление в конец файла
@@ -170,7 +188,7 @@ export function applyDiffChanges(
                 );
                 continue;
             }
-            
+
             // Безопасная замена - только первое вхождение
             const index = result.indexOf(change.search);
             if (index !== -1) {
@@ -179,7 +197,7 @@ export function applyDiffChanges(
             }
         }
     }
-    
+
     return {
         result,
         success: failedChanges === 0,
@@ -200,16 +218,16 @@ export function extractCodeFromResponse(content: string, language: string = 'bsl
     // Ищем кодовый блок с указанным языком
     const codeBlockRegex = new RegExp(`\`\`\`${language}\\s*\\n([\\s\\S]*?)\n\`\`\``, 'i');
     const match = content.match(codeBlockRegex);
-    
+
     if (match && match[1]) {
         return match[1].trim();
     }
-    
+
     // Если кодовый блок не найден, проверяем наличие diff-блоков
     if (hasDiffBlocks(content)) {
         return content; // Возвращаем как есть для последующего парсинга
     }
-    
+
     return null;
 }
 
@@ -223,13 +241,13 @@ export function detectResponseType(content: string): 'full' | 'diff' | 'unknown'
     if (hasDiffBlocks(content)) {
         return 'diff';
     }
-    
+
     // Ищем кодовый блок BSL
     const bslCodeBlock = /```bsl\s*\n[\s\S]*?\n```/i.test(content);
     if (bslCodeBlock) {
         return 'full';
     }
-    
+
     return 'unknown';
 }
 
@@ -252,10 +270,10 @@ export function safelyApplyChanges(
     errors: string[];
 } {
     const responseType = detectResponseType(aiResponse);
-    
+
     if (responseType === 'diff') {
         const parseResult = parseDiffBlocks(aiResponse);
-        
+
         if (parseResult.hasErrors) {
             return {
                 result: originalCode,
@@ -265,7 +283,7 @@ export function safelyApplyChanges(
                 errors: parseResult.errors
             };
         }
-        
+
         if (parseResult.changes.length === 0) {
             return {
                 result: originalCode,
@@ -275,24 +293,24 @@ export function safelyApplyChanges(
                 errors: ['No diff blocks found']
             };
         }
-        
+
         const applyResult = applyDiffChanges(originalCode, parseResult.changes);
-        
+
         return {
             result: applyResult.result,
             type: 'diff',
             success: applyResult.success,
-            message: applyResult.success 
+            message: applyResult.success
                 ? `Успешно применено ${applyResult.appliedCount} изменений`
                 : `Применено ${applyResult.appliedCount} изменений, ${applyResult.failedChanges} ошибок`,
             appliedCount: applyResult.appliedCount,
             errors: applyResult.errors
         };
     }
-    
+
     if (responseType === 'full') {
         const code = extractCodeFromResponse(aiResponse, 'bsl');
-        
+
         if (code) {
             return {
                 result: code,
@@ -303,7 +321,7 @@ export function safelyApplyChanges(
             };
         }
     }
-    
+
     return {
         result: originalCode,
         type: 'unknown',
