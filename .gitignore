@@ -53,3 +53,4 @@ docs/
 CLAUDE.md
 .mcp.json
 memory/
+tauri-app/src-tauri/bin/mcp-1c-search-x86_64-pc-windows-msvc.exe
