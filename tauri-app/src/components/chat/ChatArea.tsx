@@ -227,6 +227,15 @@ export function ChatArea({
     const scrollRef = useRef<HTMLDivElement>(null);
     const wasAtBottom = useRef(true);
     const autoScrollRaf = useRef<number | null>(null);
+    const isLoadingRef = useRef(isLoading);
+
+    // Синхронизируем ref с состоянием isLoading
+    useEffect(() => {
+        isLoadingRef.current = isLoading;
+    }, [isLoading]);
+
+    // Функция tick в ref — доступна из handleScroll без замыкания
+    const tickFnRef = useRef<(() => void) | null>(null);
 
     // Обработчик скролла — отслеживаем ручную прокрутку вверх
     const handleScroll = () => {
@@ -239,6 +248,10 @@ export function ChatArea({
                 cancelAnimationFrame(autoScrollRaf.current);
                 autoScrollRaf.current = null;
             }
+            // Пользователь вернулся вниз — возобновляем RAF если идёт стриминг
+            if (isAtBottom && isLoadingRef.current && !autoScrollRaf.current && tickFnRef.current) {
+                autoScrollRaf.current = requestAnimationFrame(tickFnRef.current);
+            }
         }
     };
 
@@ -249,6 +262,7 @@ export function ChatArea({
                 cancelAnimationFrame(autoScrollRaf.current);
                 autoScrollRaf.current = null;
             }
+            tickFnRef.current = null;
             // Финальная плавная прокрутка после завершения генерации
             if (wasAtBottom.current && scrollRef.current) {
                 scrollRef.current.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
@@ -268,11 +282,13 @@ export function ChatArea({
             const maxScroll = el.scrollHeight - el.clientHeight;
             const diff = maxScroll - el.scrollTop;
             if (diff > 1) {
-                // Догоняем с ускорением: чем дальше — тем быстрее
                 el.scrollTop += Math.ceil(Math.max(3, diff * 0.2));
             }
             autoScrollRaf.current = requestAnimationFrame(tick);
         };
+
+        // Сохраняем tick в ref чтобы handleScroll мог его перезапустить
+        tickFnRef.current = tick;
 
         if (!autoScrollRaf.current) {
             autoScrollRaf.current = requestAnimationFrame(tick);

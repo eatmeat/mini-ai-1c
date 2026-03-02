@@ -207,7 +207,7 @@ export function MainLayout() {
                             modifiedCode={modifiedCode}
                             onApplyCode={useCallback((code: string) => {
                                 setModifiedCode(code);
-                                setViewMode(prev => prev === 'assistant' ? 'split' : prev);
+                                // setViewMode(prev => prev === 'assistant' ? 'split' : prev); // Убрано авто-открытие
                             }, [])}
                             onCommitCode={useCallback((code: string) => {
                                 // "Принять" из чата - значит сделать код НОВЫМ визуальным бейзлайном
@@ -224,7 +224,7 @@ export function MainLayout() {
                             }}
                             onActiveDiffChange={(content) => {
                                 setActiveDiffContent(content);
-                                if (content && viewMode === 'assistant') setViewMode('split'); // Авто-открытие панели если пришли диффы
+                                // if (content && viewMode === 'assistant') setViewMode('split'); // Авто-открытие панели отключено
                             }}
                             activeDiffContent={activeDiffContent}
                         />
