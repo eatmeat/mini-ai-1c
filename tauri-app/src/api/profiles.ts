@@ -11,6 +11,7 @@ export interface LLMProfile {
     max_tokens: number;
     temperature: number;
     context_window_override?: number;
+    enable_thinking?: boolean;
     provider_subtype?: 'cli';
     cli_info?: CliProviderInfo;
 }

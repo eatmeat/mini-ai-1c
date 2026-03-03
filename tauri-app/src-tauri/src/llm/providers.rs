@@ -38,9 +38,9 @@ pub async fn fetch_models_from_api(provider_id: &str, base_url: &str, api_key: &
     if provider_id == "QwenCli" {
         return Ok(vec![
             Model { id: "coder-model".into(),       name: "Qwen 3.5 Plus (1M ctx)".into(),  context_window: 1_048_576, description: Some("Qwen 3.5 Plus — hybrid model, leading coding, 1M context".into()), cost_in: None, cost_out: None },
-            Model { id: "qwen3-coder-plus".into(),  name: "Qwen3 Coder Plus".into(),         context_window: 32_768,   description: Some("Advanced code generation and understanding".into()), cost_in: None, cost_out: None },
-            Model { id: "qwen3-coder-flash".into(), name: "Qwen3 Coder Flash".into(),        context_window: 32_768,   description: Some("Fast code generation model".into()), cost_in: None, cost_out: None },
-            Model { id: "vision-model".into(),      name: "Qwen3 Vision".into(),              context_window: 32_768,   description: Some("Multimodal vision-language model".into()), cost_in: None, cost_out: None },
+            Model { id: "qwen3-coder-plus".into(),  name: "Qwen3 Coder Plus".into(),         context_window: 1_048_576, description: Some("Advanced code generation and understanding, 1M context".into()), cost_in: None, cost_out: None },
+            Model { id: "qwen3-coder-flash".into(), name: "Qwen3 Coder Flash".into(),        context_window: 262_144,   description: Some("Fast code generation model, 256K context".into()), cost_in: None, cost_out: None },
+            Model { id: "vision-model".into(),      name: "Qwen3 Vision".into(),              context_window: 262_144,   description: Some("Multimodal vision-language model, 256K context".into()), cost_in: None, cost_out: None },
         ]);
     }
 

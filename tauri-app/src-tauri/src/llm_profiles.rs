@@ -48,6 +48,8 @@ pub struct LLMProfile {
     pub max_tokens: u32,
     pub temperature: f32,
     pub context_window_override: Option<u32>,
+    #[serde(default)]
+    pub enable_thinking: Option<bool>,
 }
 
 impl LLMProfile {
@@ -63,6 +65,7 @@ impl LLMProfile {
             max_tokens: 4096,
             temperature: 0.7,
             context_window_override: None,
+            enable_thinking: None,
         }
     }
 

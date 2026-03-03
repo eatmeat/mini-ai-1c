@@ -3,6 +3,7 @@ use regex::Regex;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::Path;
+use std::time::{Duration, Instant};
 
 pub struct SearchResult {
     pub file: String,
@@ -34,9 +35,12 @@ fn compile_pattern(query: &str, use_regex: bool) -> Option<Regex> {
 /// Search for `query` in .bsl and .xml files under `root` (or `root/sub_path` if given).
 /// `use_regex` — treat query as regex; otherwise literal case-insensitive.
 /// `sub_path` — optional relative sub-directory to restrict the search scope.
+/// `max_ms` — optional time budget in milliseconds; if exceeded, returns partial results early.
+///
+/// Returns `(results, timed_out)`.
 ///
 /// BSL-first, two-pass streaming:
-/// - Pass 1: streams `.bsl` files, stops as soon as `limit` results are found.
+/// - Pass 1: streams `.bsl` files, stops as soon as `limit` results or deadline reached.
 /// - Pass 2: streams `.xml` files — only entered if Pass 1 didn't fill the limit.
 ///
 /// Critical: does NOT collect all file paths upfront. On large configs (25K+ files)
@@ -48,10 +52,11 @@ pub fn search_code(
     query: &str,
     use_regex: bool,
     limit: usize,
-) -> Vec<SearchResult> {
+    max_ms: Option<u64>,
+) -> (Vec<SearchResult>, bool) {
     let pattern = match compile_pattern(query, use_regex) {
         Some(p) => p,
-        None => return vec![],
+        None => return (vec![], false),
     };
 
     let search_root = match sub_path {
@@ -59,16 +64,18 @@ pub fn search_code(
             let p = root.join(sub);
             if !p.exists() {
                 eprintln!("[1c-search] Scope path not found: {}", p.display());
-                return vec![];
+                return (vec![], false);
             }
             p
         }
         None => root.to_path_buf(),
     };
 
+    let deadline = max_ms.map(|ms| Instant::now() + Duration::from_millis(ms));
     let mut results = Vec::new();
+    let mut file_count = 0usize;
 
-    // Pass 1: BSL only — streaming, early exit at limit
+    // Pass 1: BSL only — streaming, early exit at limit or deadline
     'bsl: for entry in WalkBuilder::new(&search_root)
         .standard_filters(true)
         .follow_links(false)
@@ -81,6 +88,15 @@ pub fn search_code(
         }
         if path.extension().and_then(|e| e.to_str()) != Some("bsl") {
             continue;
+        }
+        file_count += 1;
+        // Check deadline every 200 files (avoids clock overhead on each file)
+        if file_count % 200 == 0 {
+            if let Some(dl) = deadline {
+                if Instant::now() >= dl {
+                    return (results, true);
+                }
+            }
         }
         for r in search_file(path, &pattern, root) {
             results.push(r);
@@ -105,6 +121,14 @@ pub fn search_code(
             if path.extension().and_then(|e| e.to_str()) != Some("xml") {
                 continue;
             }
+            file_count += 1;
+            if file_count % 200 == 0 {
+                if let Some(dl) = deadline {
+                    if Instant::now() >= dl {
+                        return (results, true);
+                    }
+                }
+            }
             for r in search_file(path, &pattern, root) {
                 results.push(r);
                 if results.len() >= limit {
@@ -114,7 +138,7 @@ pub fn search_code(
         }
     }
 
-    results
+    (results, false)
 }
 
 /// Search for `query` only in the specified set of files (given as relative paths from `root`).
@@ -212,7 +236,7 @@ pub fn get_file_context(path: &Path, target_line: usize, radius: usize) -> Resul
     Ok(out)
 }
 
-/// Per-file match summary used by impact_analysis.
+/// Per-file match summary used by impact_analysis and find_references.
 pub struct FileHits {
     pub file: String,
     pub count: usize,
@@ -221,95 +245,148 @@ pub struct FileHits {
 
 /// Scan all `.bsl`/`.xml` files under `root` and return a per-file hit summary.
 ///
-/// Unlike `search_code` which collects individual line matches up to a fixed total,
-/// this function stops after finding `max_files` files that contain at least one match.
-/// It collects up to `examples_per_file` example lines per file.
-/// Results are sorted by match count descending.
+/// BSL-first, two-pass streaming (same strategy as `search_code`):
+/// - Pass 1: `.bsl` files only — stops after `max_files` matched files or deadline.
+/// - Pass 2: `.xml` files — only if Pass 1 didn't reach `max_files`.
 ///
-/// This is the correct approach for impact_analysis: for widely-used symbols that
-/// appear in hundreds of files, the old limit=500 approach had to scan ALL files;
-/// this approach stops after `max_files` matched files, which is O(matched_files)
-/// instead of O(total_files).
+/// `max_ms` — optional time budget. If exceeded, returns partial results with `timed_out=true`.
+///
+/// Returns `(results_sorted_by_count_desc, timed_out)`.
 pub fn search_files_summary(
     root: &Path,
     query: &str,
     use_regex: bool,
     max_files: usize,
     examples_per_file: usize,
-) -> Vec<FileHits> {
+    max_ms: Option<u64>,
+) -> (Vec<FileHits>, bool) {
     let pattern = if use_regex {
         match Regex::new(query) {
             Ok(r) => r,
             Err(e) => {
                 eprintln!("[1c-search] Invalid regex '{}': {}", query, e);
-                return vec![];
+                return (vec![], false);
             }
         }
     } else {
         match Regex::new(&format!("(?i){}", regex::escape(query))) {
             Ok(r) => r,
-            Err(_) => return vec![],
+            Err(_) => return (vec![], false),
         }
     };
 
-    let walker = WalkBuilder::new(root)
+    let deadline = max_ms.map(|ms| Instant::now() + Duration::from_millis(ms));
+    let mut results: Vec<FileHits> = Vec::new();
+    let mut file_count = 0usize;
+    let mut timed_out = false;
+
+    // Pass 1: BSL only
+    'bsl: for entry in WalkBuilder::new(root)
         .standard_filters(true)
         .follow_links(false)
-        .build();
-
-    let mut results: Vec<FileHits> = Vec::new();
-
-    for entry in walker {
+        .build()
+        .flatten()
+    {
         if results.len() >= max_files {
             break;
         }
-        let entry = match entry {
-            Ok(e) => e,
-            Err(_) => continue,
-        };
         let path = entry.path();
         if !path.is_file() {
             continue;
         }
-        let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
-        if ext != "bsl" && ext != "xml" {
+        if path.extension().and_then(|e| e.to_str()) != Some("bsl") {
             continue;
         }
-
-        let rel_path = path
-            .strip_prefix(root)
-            .map(|p| p.to_string_lossy().replace('\\', "/"))
-            .unwrap_or_else(|_| path.to_string_lossy().replace('\\', "/"));
-
-        let file = match File::open(path) {
-            Ok(f) => f,
-            Err(_) => continue,
-        };
-
-        let reader = BufReader::new(file);
-        let mut count = 0usize;
-        let mut examples: Vec<(u32, String)> = Vec::new();
-
-        for (idx, line) in reader.lines().enumerate() {
-            let line = match line {
-                Ok(l) => l,
-                Err(_) => continue,
-            };
-            if pattern.is_match(&line) {
-                count += 1;
-                if examples.len() < examples_per_file {
-                    examples.push(((idx + 1) as u32, line));
+        file_count += 1;
+        if file_count % 200 == 0 {
+            if let Some(dl) = deadline {
+                if Instant::now() >= dl {
+                    timed_out = true;
+                    break 'bsl;
                 }
             }
         }
+        if let Some(hits) = scan_one_file_hits(path, &pattern, root, examples_per_file) {
+            results.push(hits);
+        }
+    }
 
-        if count > 0 {
-            results.push(FileHits { file: rel_path, count, examples });
+    // Pass 2: XML only — skipped if BSL already filled max_files or timed out
+    if !timed_out && results.len() < max_files {
+        'xml: for entry in WalkBuilder::new(root)
+            .standard_filters(true)
+            .follow_links(false)
+            .build()
+            .flatten()
+        {
+            if results.len() >= max_files {
+                break;
+            }
+            let path = entry.path();
+            if !path.is_file() {
+                continue;
+            }
+            if path.extension().and_then(|e| e.to_str()) != Some("xml") {
+                continue;
+            }
+            file_count += 1;
+            if file_count % 200 == 0 {
+                if let Some(dl) = deadline {
+                    if Instant::now() >= dl {
+                        timed_out = true;
+                        break 'xml;
+                    }
+                }
+            }
+            if let Some(hits) = scan_one_file_hits(path, &pattern, root, examples_per_file) {
+                results.push(hits);
+            }
         }
     }
 
     results.sort_by(|a, b| b.count.cmp(&a.count));
-    results
+    (results, timed_out)
+}
+
+/// Read one file and return FileHits if it contains at least one match.
+fn scan_one_file_hits(
+    path: &Path,
+    pattern: &Regex,
+    root: &Path,
+    examples_per_file: usize,
+) -> Option<FileHits> {
+    let rel_path = path
+        .strip_prefix(root)
+        .map(|p| p.to_string_lossy().replace('\\', "/"))
+        .unwrap_or_else(|_| path.to_string_lossy().replace('\\', "/"));
+
+    let file = match File::open(path) {
+        Ok(f) => f,
+        Err(_) => return None,
+    };
+
+    let reader = BufReader::new(file);
+    let mut count = 0usize;
+    let mut examples: Vec<(u32, String)> = Vec::new();
+
+    for (idx, line) in reader.lines().enumerate() {
+        let line = match line {
+            Ok(l) => l,
+            Err(_) => continue,
+        };
+        if pattern.is_match(&line) {
+            count += 1;
+            if examples.len() < examples_per_file {
+                examples.push(((idx + 1) as u32, line));
+            }
+        }
+    }
+
+    if count > 0 {
+        Some(FileHits { file: rel_path, count, examples })
+    } else {
+        None
+    }
 }
 
 /// Считает кол-во конфигурационных файлов (`.bsl`, `.xml`) и возвращает `(count, size_in_mb)`.

@@ -67,6 +67,12 @@ struct ChatRequest {
     max_tokens: u32,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tools: Option<Vec<Tool>>,
+    /// Qwen3 extended thinking mode (must use temperature=1.0)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    enable_thinking: Option<bool>,
+    /// Token budget for thinking step (1024–38912, default 8192)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    thinking_budget_tokens: Option<u32>,
 }
 
 /// Streaming chunk from OpenAI API
@@ -290,8 +296,8 @@ pub fn get_system_prompt(available_tools: &[ToolInfo], messages: &[ApiMessage]) 
     // Инструкции режима редактирования — зависят от наличия кода в контексте
     let edit_mode_instructions = if has_code {
         r#"РЕЖИМ ОТВЕТА НА ВОПРОСЫ (СТРОГИЙ ПРИОРИТЕТ):
-- Если запрос пользователя является ВОПРОСОМ (содержит слова: "что делает", "объясни", "как работает", "расскажи", "зачем", "почему", "что такое", "как используется") — ОТВЕЧАЙ ТОЛЬКО ТЕКСТОМ.
-- В режиме вопроса ЗАПРЕЩЕНО использовать блоки SEARCH/REPLACE.
+- Если запрос пользователя является ВОПРОСОМ (содержит слова: "что делает", "объясни", "как работает", "расскажи", "зачем", "почему", "что такое", "как используется") — отвечай текстом, НЕ используй SEARCH/REPLACE.
+- ВАЖНО: запрет на SEARCH/REPLACE в режиме вопроса НЕ запрещает вызывать MCP-инструменты (search_code, find_references и др.) — их используй всегда когда нужно найти информацию в конфигурации.
 - В режиме вопроса ЗАПРЕЩЕНО вносить ЛЮБЫЕ изменения в код, даже "очевидные улучшения" или исправления.
 - Изменения кода (SEARCH/REPLACE) — если запрос содержит явное действие: "исправь", "добавь", "измени", "перепиши", "удали", "создай", "реализуй", "оптимизируй", **"допиши"**, **"заверши"**, "дополни".
 - ПУСТОЙ МОДУЛЬ: Если исходный код BSL пуст или содержит только маркер/комментарии, а пользователь просит "добавить", "создать" или "написать" — генерируй ПОЛНЫЙ текст модуля с нуля в блоке ```bsl. Не пытайся использовать SEARCH/REPLACE для абсолютно пустого файла.
@@ -744,7 +750,7 @@ pub async fn stream_chat_completion(
     // not the generation limit. Use provider-specific defaults.
     let api_max_tokens = if matches!(profile.provider, LLMProvider::QwenCli) {
         // Qwen3-Coder supports up to 65536 generation tokens
-        32768u32
+        65536u32
     } else if profile.max_tokens > 16384 {
         // Other providers: large value likely means "context window", clamp to safe default
         4096
@@ -752,13 +758,20 @@ pub async fn stream_chat_completion(
         profile.max_tokens
     };
 
+    // Extended thinking (Qwen3 only). When enabled, temperature MUST be 1.0.
+    let thinking_enabled = matches!(profile.provider, LLMProvider::QwenCli)
+        && profile.enable_thinking.unwrap_or(false);
+    let effective_temperature = if thinking_enabled { 1.0 } else { profile.temperature };
+
     let request_body = ChatRequest {
         model: profile.model.clone(),
         messages: api_messages,
         stream: true,
-        temperature: profile.temperature,
+        temperature: effective_temperature,
         max_tokens: api_max_tokens,
         tools: tools_opt,
+        enable_thinking: if thinking_enabled { Some(true) } else { None },
+        thinking_budget_tokens: if thinking_enabled { Some(8192) } else { None },
     };
     
     // Build headers

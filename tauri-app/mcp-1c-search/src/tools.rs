@@ -300,7 +300,7 @@ async fn handle_search_code(
 
     let start_time = std::time::Instant::now();
 
-    let results = tokio::task::spawn_blocking(move || {
+    let (results, timed_out) = tokio::task::spawn_blocking(move || -> (Vec<search::SearchResult>, bool) {
         // Phase 1: SQLite-guided search
         // Query the symbols table for files that DECLARE symbols matching the query.
         // These files are the most likely to also contain usages — grep only them first.
@@ -330,14 +330,14 @@ async fn handle_search_code(
                             "[1c-search] index-guided: {} results from {} hint files",
                             hot.len(), hot_files.len()
                         );
-                        return hot;
+                        return (hot, false);
                     }
                 }
             }
         }
         // Phase 2: no index hint (regex, scoped, spaces in query, or no db)
-        // BSL-first two-pass streaming scan — stops as soon as limit is reached.
-        search::search_code(&root_clone, sub_path_clone.as_deref(), &query_owned, use_regex, limit)
+        // BSL-first two-pass streaming scan — capped at 8s to avoid multi-minute waits on HDD.
+        search::search_code(&root_clone, sub_path_clone.as_deref(), &query_owned, use_regex, limit, Some(8_000))
     })
     .await
     .map_err(|e| format!("Ошибка выполнения поиска: {}", e))?;
@@ -350,10 +350,15 @@ async fn handle_search_code(
         .unwrap_or_default();
 
     if results.is_empty() {
+        let timeout_note = if timed_out {
+            " Поиск прерван по таймауту (8с) — попробуйте уточнить запрос через параметр `scope`."
+        } else {
+            ""
+        };
         return Ok(json!({
             "content": [{ "type": "text", "text": format!(
-                "По запросу \"{}\"{}  ничего не найдено. ({}мс)",
-                query, scope_label, elapsed
+                "По запросу \"{}\"{}  ничего не найдено. ({}мс){}",
+                query, scope_label, elapsed, timeout_note
             )}]
         }));
     }
@@ -367,6 +372,12 @@ async fn handle_search_code(
         text.push_str(&format!(
             "**{}:{}**\n```{}\n{}\n```\n\n",
             r.file, r.line, ext, r.snippet.trim()
+        ));
+    }
+    if timed_out {
+        text.push_str(&format!(
+            "\n⚠️ *Поиск ограничен по времени (8с) — показаны первые {} результатов. Для полного поиска используйте параметр `scope`.*",
+            results.len()
         ));
     }
 
@@ -758,18 +769,21 @@ async fn handle_find_references(
     let symbol_owned = symbol.to_string();
 
     let start = std::time::Instant::now();
-    let results = tokio::task::spawn_blocking(move || {
-        search::search_code(&root_clone, None, &symbol_owned, false, limit)
+    let (results, timed_out) = tokio::task::spawn_blocking(move || {
+        search::search_code(&root_clone, None, &symbol_owned, false, limit, Some(8_000))
     })
     .await
     .map_err(|e| format!("Ошибка поиска: {}", e))?;
     let elapsed = start.elapsed().as_millis();
 
     if results.is_empty() {
+        let note = if timed_out {
+            " Поиск прерван по таймауту (8с) — символ мог не встретиться в первых просмотренных файлах."
+        } else { "" };
         return Ok(json!({
             "content": [{
                 "type": "text",
-                "text": format!("Символ \"{}\" не найден в коде конфигурации. ({}мс)", symbol, elapsed)
+                "text": format!("Символ \"{}\" не найден в коде конфигурации. ({}мс){}", symbol, elapsed, note)
             }]
         }));
     }
@@ -807,8 +821,12 @@ async fn handle_find_references(
         }
         text.push('\n');
     }
-    if results.len() >= limit {
-
+    if timed_out {
+        text.push_str(&format!(
+            "\n⚠️ *Поиск ограничен по времени (8с) — показаны первые {} результатов. Для полного поиска уточните область через `scope`.*",
+            results.len()
+        ));
+    } else if results.len() >= limit {
         text.push_str(&format!(
             "*Показано {} результатов. Увеличьте `limit` для большего количества.*",
             limit
@@ -851,19 +869,20 @@ async fn handle_impact_analysis(
     const MAX_FILES: usize = 50;
     const EXAMPLES_PER_FILE: usize = 3;
 
-    let (details, hits): (Option<index::ObjectDetails>, Vec<search::FileHits>) =
+    let (details, hits, timed_out): (Option<index::ObjectDetails>, Vec<search::FileHits>, bool) =
         tokio::task::spawn_blocking(move || {
             let details = db_clone
                 .as_deref()
                 .and_then(|db| index::get_object_details(db, &object_name_owned));
-            let hits = search::search_files_summary(
+            let (hits, timed_out) = search::search_files_summary(
                 &root_clone,
                 &search_term_clone,
                 false,
                 MAX_FILES,
                 EXAMPLES_PER_FILE,
+                Some(8_000),
             );
-            (details, hits)
+            (details, hits, timed_out)
         })
         .await
         .map_err(|e| format!("Ошибка выполнения: {}", e))?;
@@ -914,7 +933,12 @@ async fn handle_impact_analysis(
                 }
             }
         }
-        if hits.len() >= MAX_FILES {
+        if timed_out {
+            text.push_str(&format!(
+                "\n⚠️ *Поиск ограничен по времени (8с) — показаны {} файлов из найденных. Объект используется шире.*",
+                hits.len()
+            ));
+        } else if hits.len() >= MAX_FILES {
             text.push_str(
                 "\n*Поиск ограничен первыми 50 файлами. Объект широко используется в конфигурации.*",
             );

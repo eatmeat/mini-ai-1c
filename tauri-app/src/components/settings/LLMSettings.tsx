@@ -508,7 +508,12 @@ export function LLMSettings({ profiles, onUpdate }: LLMSettingsProps) {
 
                             <div className="flex flex-wrap gap-4 pt-2">
                                 <div className="flex-1 min-w-[120px]">
-                                    <label className="text-xs text-zinc-500 uppercase font-bold px-1">Context Window</label>
+                                    <label className="text-xs text-zinc-500 uppercase font-bold px-1">
+                                        Max tokens
+                                        {editForm.provider === 'QwenCli' && (
+                                            <span className="ml-1 text-zinc-600 normal-case font-normal">(фиксировано 65536)</span>
+                                        )}
+                                    </label>
                                     <input
                                         type="number"
                                         className="w-full mt-1 bg-zinc-900 border border-zinc-700 rounded-md px-3 h-9 text-sm text-zinc-200"
@@ -517,7 +522,12 @@ export function LLMSettings({ profiles, onUpdate }: LLMSettingsProps) {
                                     />
                                 </div>
                                 <div className="flex-1 min-w-[120px]">
-                                    <label className="text-xs text-zinc-500 uppercase font-bold px-1">Temperature</label>
+                                    <label className="text-xs text-zinc-500 uppercase font-bold px-1">
+                                        Temperature
+                                        {editForm.provider === 'QwenCli' && editForm.enable_thinking && (
+                                            <span className="ml-1 text-amber-600 normal-case font-normal">(→ 1.0 при thinking)</span>
+                                        )}
+                                    </label>
                                     <input
                                         type="number" step="0.1" min="0" max="2"
                                         className="w-full mt-1 bg-zinc-900 border border-zinc-700 rounded-md px-3 h-9 text-sm text-zinc-200"
@@ -526,6 +536,25 @@ export function LLMSettings({ profiles, onUpdate }: LLMSettingsProps) {
                                     />
                                 </div>
                             </div>
+
+                            {/* Thinking mode toggle — Qwen CLI only */}
+                            {editForm.provider === 'QwenCli' && (
+                                <div className="flex items-center justify-between pt-3 px-1">
+                                    <div>
+                                        <span className="text-xs text-zinc-400 font-medium">Режим размышлений</span>
+                                        <p className="text-[10px] text-zinc-600 mt-0.5">
+                                            enable_thinking · budget 8192 токенов · temp → 1.0
+                                        </p>
+                                    </div>
+                                    <button
+                                        type="button"
+                                        onClick={() => setEditForm({ ...editForm, enable_thinking: !editForm.enable_thinking })}
+                                        className={`relative w-9 h-5 rounded-full transition-colors focus:outline-none ${editForm.enable_thinking ? 'bg-blue-500' : 'bg-zinc-700'}`}
+                                    >
+                                        <span className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white transition-transform ${editForm.enable_thinking ? 'translate-x-4' : 'translate-x-0'}`} />
+                                    </button>
+                                </div>
+                            )}
                         </div>
 
                         {/* Save Button */}
