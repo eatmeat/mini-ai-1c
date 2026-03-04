@@ -11,6 +11,7 @@ export type DiffApplyStatus =
     | 'applied_exact'      // Точное совпадение, применено
     | 'applied_trimmed'    // Совпадение без концевых пробелов, применено
     | 'applied_loose'      // Совпадение без учёта отступов, применено с восстановлением
+    | 'applied_ws'         // Совпадение без всех пробелов (whitespace-ignored), применено
     | 'applied_fuzzy'      // Нечёткое совпадение, применено с предупреждением
     | 'failed_not_found'   // Блок не найден в исходном коде
     | 'failed_ambiguous'   // Найдено несколько совпадений
@@ -44,29 +45,81 @@ export interface DiffApplyResult {
 
 // ─── Вспомогательные функции ───────────────────────────────────────────────────
 
-/** Вычисляет схожесть двух строк: 0 = разные, 1 = идентичны */
+/**
+ * Расстояние Левенштейна между двумя строками (две строки DP, O(m*n)).
+ * Для больших строк усекает до MAX_LEV_LEN для производительности.
+ */
+const MAX_LEV_LEN = 600;
+function levenshteinDistance(a: string, b: string): number {
+    if (a === b) return 0;
+    if (!a) return Math.min(b.length, MAX_LEV_LEN);
+    if (!b) return Math.min(a.length, MAX_LEV_LEN);
+    const aS = a.length > MAX_LEV_LEN ? a.substring(0, MAX_LEV_LEN) : a;
+    const bS = b.length > MAX_LEV_LEN ? b.substring(0, MAX_LEV_LEN) : b;
+    const m = aS.length, n = bS.length;
+    let prev = Array.from({ length: n + 1 }, (_, i) => i);
+    let curr = new Array(n + 1).fill(0);
+    for (let i = 1; i <= m; i++) {
+        curr[0] = i;
+        for (let j = 1; j <= n; j++) {
+            curr[j] = aS[i - 1] === bS[j - 1]
+                ? prev[j - 1]
+                : 1 + Math.min(prev[j], curr[j - 1], prev[j - 1]);
+        }
+        [prev, curr] = [curr, prev];
+    }
+    return prev[n];
+}
+
+/** Вычисляет схожесть двух строк через расстояние Левенштейна: 0 = разные, 1 = идентичны */
 function stringSimilarity(a: string, b: string): number {
     if (a === b) return 1;
     if (!a || !b) return 0;
-    const maxLen = Math.max(a.length, b.length);
-    let matches = 0;
-    const shorter = a.length < b.length ? a : b;
-    const longer = a.length < b.length ? b : a;
-    for (let i = 0; i < shorter.length; i++) {
-        if (shorter[i] === longer[i]) matches++;
-    }
-    return matches / maxLen;
+    const maxLen = Math.max(
+        Math.min(a.length, MAX_LEV_LEN),
+        Math.min(b.length, MAX_LEV_LEN)
+    );
+    if (maxLen === 0) return 1;
+    return 1 - levenshteinDistance(a, b) / maxLen;
 }
 
-/** Считает схожесть двух блоков строк как среднее по строкам */
+/**
+ * Считает схожесть двух блоков строк через нормализованный текст.
+ * Поддерживает разное количество строк (в отличие от предыдущей позиционной реализации).
+ */
 function blockSimilarity(aLines: string[], bLines: string[]): number {
-    if (aLines.length !== bLines.length) return 0;
-    const sims = aLines.map((l, i) => stringSimilarity(l.trim(), bLines[i].trim()));
-    return sims.reduce((s, v) => s + v, 0) / sims.length;
+    const aText = aLines.map(l => l.trim()).join('\n');
+    const bText = bLines.map(l => l.trim()).join('\n');
+    return stringSimilarity(aText, bText);
 }
 
-/** Восстанавливает отступы в заменяемом тексте по образцу первой строки оригинала */
-function restoreIndent(originalFirstLine: string, replaceText: string): string {
+/**
+ * Восстанавливает относительные отступы в replace-тексте по образцу оригинала.
+ * Сохраняет относительное вложение всех строк (как в Roo-Code).
+ */
+function restoreIndent(
+    originalMatchedLines: string[],
+    searchLines: string[],
+    replaceText: string
+): string {
+    const replaceLines = replaceText.split('\n');
+    const matchedBaseIndent = (originalMatchedLines[0]?.match(/^[\t ]*/) ?? [''])[0];
+    const searchBaseIndent = (searchLines[0]?.match(/^[\t ]*/) ?? [''])[0];
+    const searchBaseLevel = searchBaseIndent.length;
+
+    return replaceLines.map(line => {
+        if (!line.trim()) return line; // пустые строки не трогаем
+        const currentIndent = (line.match(/^[\t ]*/) ?? [''])[0];
+        const relativeLevel = currentIndent.length - searchBaseLevel;
+        const finalIndent = relativeLevel <= 0
+            ? matchedBaseIndent.slice(0, Math.max(0, matchedBaseIndent.length + relativeLevel))
+            : matchedBaseIndent + currentIndent.slice(searchBaseLevel);
+        return finalIndent + line.trimStart();
+    }).join('\n');
+}
+
+/** Старый вариант restoreIndent для однострочных замен без контекста */
+function restoreIndentSimple(originalFirstLine: string, replaceText: string): string {
     const indent = originalFirstLine.match(/^\s*/)?.[0] ?? '';
     if (!indent) return replaceText;
     return replaceText.split('\n')
@@ -80,6 +133,63 @@ function restoreIndent(originalFirstLine: string, replaceText: string): string {
 
 /** Критичность схожести для fuzzy-принятия */
 const FUZZY_THRESHOLD = 0.85;
+
+/**
+ * Стратегия whitespace-ignored: удаляет все пробельные символы и ищет совпадение.
+ * Возвращает символьные позиции в оригинальном тексте или null.
+ * Адаптировано из Continue.dev findSearchMatch.ts.
+ */
+function findWhitespaceIgnored(
+    code: string,
+    nSearch: string
+): { startChar: number; endChar: number } | null {
+    const strip = (s: string) => s.replace(/\s/g, '');
+    const strippedCode = strip(code);
+    const strippedSearch = strip(nSearch);
+    if (!strippedSearch) return null;
+
+    const idx = strippedCode.indexOf(strippedSearch);
+    if (idx === -1) return null;
+
+    // Строим маппинг: stripped_index → original_index
+    const strippedToOrig: number[] = [];
+    for (let i = 0; i < code.length; i++) {
+        if (!/\s/.test(code[i])) strippedToOrig.push(i);
+    }
+
+    const endStrippedIdx = idx + strippedSearch.length - 1;
+    if (idx >= strippedToOrig.length || endStrippedIdx >= strippedToOrig.length) return null;
+
+    const startChar = strippedToOrig[idx];
+    const endChar = strippedToOrig[endStrippedIdx] + 1;
+    return { startChar, endChar };
+}
+
+/**
+ * Стратегия dot-dot-dots: обрабатывает `...` как "пропустить строки" в SEARCH-блоке.
+ * Адаптировано из Aider editblock_coder.py.
+ */
+function tryDotDotDots(code: string, search: string, replace: string): string | null {
+    const dotLineRe = /^[ \t]*\.\.\.[ \t]*$/m;
+    if (!dotLineRe.test(search)) return null;
+
+    const splitDots = (s: string) => s.split(/^[ \t]*\.\.\.[ \t]*\r?\n?/m);
+    const searchParts = splitDots(search).filter(p => p.trim());
+    const replaceParts = splitDots(replace).filter(p => p.trim());
+
+    if (searchParts.length <= 1) return null;
+    if (searchParts.length !== replaceParts.length) return null;
+
+    let result = code;
+    for (let k = 0; k < searchParts.length; k++) {
+        const sp = searchParts[k];
+        const rp = replaceParts[k];
+        const occurrences = result.split(sp).length - 1;
+        if (occurrences !== 1) return null; // неоднозначно
+        result = result.replace(sp, rp);
+    }
+    return result;
+}
 
 // ─── Создание блока ────────────────────────────────────────────────────────────
 
@@ -119,9 +229,7 @@ function createBlock(searchLines: string[], replaceLines: string[], index: numbe
  * Парсит текст сообщения на блоки изменений с поддержкой незавершенных блоков.
  */
 export function parseDiffBlocks(content: string): DiffBlock[] {
-    // Normalize CRLF → LF so that the regex \n? correctly strips the newline
-    // after <search>/<replace> tags (otherwise the \r becomes the first char
-    // of the captured content, creating a spurious leading empty line)
+    // Normalize CRLF → LF
     content = content.replace(/\r\n/g, '\n');
 
     const blocks: DiffBlock[] = [];
@@ -135,6 +243,7 @@ export function parseDiffBlocks(content: string): DiffBlock[] {
     }
 
     // Парсим SEARCH/REPLACE формат (legacy)
+    // Поддерживаем 5-9 символов chevron и лишний > в маркерах (Claude Sonnet 4 иногда добавляет)
     const legacyContent = content.replace(xmlRegex, '');
     const lines = legacyContent.split('\n');
     let mode: 'none' | 'search' | 'replace' = 'none';
@@ -144,18 +253,18 @@ export function parseDiffBlocks(content: string): DiffBlock[] {
     for (const line of lines) {
         const trimmed = line.trim();
 
-        if (trimmed.startsWith('<<<<<<< SEARCH')) {
+        if (/^<{5,9} SEARCH>?\s*$/.test(trimmed)) {
             if (mode === 'replace' && (searchLines.length > 0 || replaceLines.length > 0)) {
                 blocks.push(createBlock(searchLines, replaceLines, index++));
             }
             mode = 'search'; searchLines = []; replaceLines = [];
             continue;
         }
-        if (trimmed === '=======') {
+        if (/^={5,9}\s*$/.test(trimmed)) {
             if (mode === 'search') mode = 'replace';
             continue;
         }
-        if (trimmed.startsWith('>>>>>>> REPLACE')) {
+        if (/^>{5,9} REPLACE>?\s*$/.test(trimmed)) {
             if (mode === 'replace') {
                 blocks.push(createBlock(searchLines, replaceLines, index++));
                 mode = 'none'; searchLines = []; replaceLines = [];
@@ -183,17 +292,39 @@ export function parseDiffBlocks(content: string): DiffBlock[] {
 function applyBlock(code: string, block: DiffBlock): { code: string; block: DiffBlock } {
     const nSearch = block.search.replace(/\r\n/g, '\n');
     const nReplace = block.replace.replace(/\r\n/g, '\n');
+
+    // ── Пустой SEARCH = вставить в начало файла ────────────────────────────────
+    if (nSearch.trim() === '') {
+        return {
+            code: nReplace + (code ? '\n' + code : ''),
+            block: { ...block, applyStatus: 'applied_exact', appliedAt: 1 }
+        };
+    }
+
     const originalLines = code.split('\n');
     const searchLines = nSearch.split('\n');
     // Убираем хвостовые пустые строки из SEARCH (ИИ часто ставит пустую строку перед </search>)
     while (searchLines.length > 0 && searchLines[searchLines.length - 1].trim() === '') {
         searchLines.pop();
     }
+    if (searchLines.length === 0) {
+        return {
+            code: nReplace + (code ? '\n' + code : ''),
+            block: { ...block, applyStatus: 'applied_exact', appliedAt: 1 }
+        };
+    }
+
+    // ── Стратегия 0: Dot-dot-dots (`...` в SEARCH) ────────────────────────────
+    const dotsResult = tryDotDotDots(code, nSearch, nReplace);
+    if (dotsResult !== null) {
+        const lineIdx = code.substring(0, code.indexOf(searchLines[0])).split('\n').length;
+        return { code: dotsResult, block: { ...block, applyStatus: 'applied_exact', appliedAt: lineIdx } };
+    }
 
     // ── Стратегия 1: Точное совпадение ────────────────────────────────────────
-    if (code.includes(nSearch)) {
-        // Проверяем, единственное ли совпадение
-        const occurrences = code.split(nSearch).length - 1;
+    const cleanSearch = searchLines.join('\n');
+    if (code.includes(cleanSearch)) {
+        const occurrences = code.split(cleanSearch).length - 1;
         if (occurrences > 1) {
             return {
                 code,
@@ -204,9 +335,9 @@ function applyBlock(code: string, block: DiffBlock): { code: string; block: Diff
                 }
             };
         }
-        const lineIdx = code.substring(0, code.indexOf(nSearch)).split('\n').length;
+        const lineIdx = code.substring(0, code.indexOf(cleanSearch)).split('\n').length;
         return {
-            code: code.replace(nSearch, nReplace),
+            code: code.replace(cleanSearch, nReplace),
             block: { ...block, applyStatus: 'applied_exact', appliedAt: lineIdx }
         };
     }
@@ -219,9 +350,8 @@ function applyBlock(code: string, block: DiffBlock): { code: string; block: Diff
         }
         if (match) {
             let finalReplace = nReplace;
-            // Если замена однострочная и без отступа — восстанавливаем
             if (searchLines.length === 1 && !nReplace.startsWith(' ') && !nReplace.startsWith('\t')) {
-                finalReplace = restoreIndent(originalLines[i], nReplace);
+                finalReplace = restoreIndentSimple(originalLines[i], nReplace);
             }
             const result = [...originalLines.slice(0, i), finalReplace, ...originalLines.slice(i + searchLines.length)].join('\n');
             return { code: result, block: { ...block, applyStatus: 'applied_trimmed', appliedAt: i + 1 } };
@@ -239,31 +369,52 @@ function applyBlock(code: string, block: DiffBlock): { code: string; block: Diff
             if (looseOriginal[i + j] !== looseSearch[j]) { match = false; break; }
         }
         if (match) {
-            const finalReplace = restoreIndent(originalLines[i], nReplace);
+            const finalReplace = restoreIndent(originalLines.slice(i, i + searchLines.length), searchLines, nReplace);
             const result = [...originalLines.slice(0, i), finalReplace, ...originalLines.slice(i + searchLines.length)].join('\n');
-            console.log(`[applyDiff] loose-match на строке ${i + 1}, отступ восстановлен`);
+            console.log(`[applyDiff] loose-match на строке ${i + 1}`);
             return { code: result, block: { ...block, applyStatus: 'applied_loose', appliedAt: i + 1 } };
         }
     }
 
-    // ── Стратегия 4: Fuzzy matching ───────────────────────────────────────────
-    // Ищем окно с наибольшей схожестью
+    // ── Стратегия 3.5: Whitespace-ignored ─────────────────────────────────────
+    // Удаляем ВСЕ пробельные символы и маппим позицию обратно (из Continue.dev)
+    const wsResult = findWhitespaceIgnored(code, cleanSearch);
+    if (wsResult) {
+        const before = code.substring(0, wsResult.startChar);
+        const after = code.substring(wsResult.endChar);
+        const newCode = before + nReplace + after;
+        const lineIdx = before.split('\n').length;
+        console.log(`[applyDiff] whitespace-ignored match на строке ${lineIdx}`);
+        return { code: newCode, block: { ...block, applyStatus: 'applied_ws', appliedAt: lineIdx } };
+    }
+
+    // ── Стратегия 4: Fuzzy matching (переменное окно ±15%, Левенштейн) ────────
+    // Адаптировано из Aider (переменное окно) + Roo-Code (Левенштейн)
+    const scale = 0.15;
+    const minLen = Math.max(1, Math.floor(searchLines.length * (1 - scale)));
+    const maxLen = Math.ceil(searchLines.length * (1 + scale));
+
     let bestScore = 0;
     let bestIdx = -1;
+    let bestLen = searchLines.length;
 
-    for (let i = 0; i <= originalLines.length - searchLines.length; i++) {
-        const windowLines = originalLines.slice(i, i + searchLines.length);
-        const score = blockSimilarity(windowLines, searchLines);
-        if (score > bestScore) {
-            bestScore = score;
-            bestIdx = i;
+    for (let len = minLen; len <= maxLen; len++) {
+        for (let i = 0; i <= originalLines.length - len; i++) {
+            const windowLines = originalLines.slice(i, i + len);
+            const score = blockSimilarity(windowLines, searchLines);
+            if (score > bestScore) {
+                bestScore = score;
+                bestIdx = i;
+                bestLen = len;
+            }
         }
     }
 
     if (bestScore >= FUZZY_THRESHOLD && bestIdx >= 0) {
-        const finalReplace = restoreIndent(originalLines[bestIdx], nReplace);
-        const result = [...originalLines.slice(0, bestIdx), finalReplace, ...originalLines.slice(bestIdx + searchLines.length)].join('\n');
-        console.warn(`[applyDiff] fuzzy-match на строке ${bestIdx + 1}, схожесть ${(bestScore * 100).toFixed(0)}%`);
+        const matchedLines = originalLines.slice(bestIdx, bestIdx + bestLen);
+        const finalReplace = restoreIndent(matchedLines, searchLines, nReplace);
+        const result = [...originalLines.slice(0, bestIdx), finalReplace, ...originalLines.slice(bestIdx + bestLen)].join('\n');
+        console.warn(`[applyDiff] fuzzy-match на строке ${bestIdx + 1}, схожесть ${(bestScore * 100).toFixed(0)}%, окно ${bestLen} строк`);
         return {
             code: result,
             block: {
@@ -277,12 +428,24 @@ function applyBlock(code: string, block: DiffBlock): { code: string; block: Diff
 
     // ── Провал: блок не найден ─────────────────────────────────────────────────
     const searchPreview = searchLines[0]?.trim().substring(0, 60) ?? '';
+    // Подсказка: ищем наиболее похожую строку (как в Aider "did you mean")
+    let hint = '';
+    if (searchLines[0]?.trim()) {
+        let hintBest = 0;
+        let hintLine = '';
+        for (const line of originalLines) {
+            const s = stringSimilarity(line.trim(), searchLines[0].trim());
+            if (s > hintBest && s > 0.5) { hintBest = s; hintLine = line.trim(); }
+        }
+        if (hintLine) hint = ` Похожая строка: "${hintLine.substring(0, 50)}"`;
+    }
+
     return {
         code,
         block: {
             ...block,
             applyStatus: 'failed_not_found',
-            applyError: `Блок не найден в исходном коде. Начало поиска: "${searchPreview}..."`
+            applyError: `Блок не найден в исходном коде. Начало поиска: "${searchPreview}"${hint}`
         }
     };
 }

@@ -26,13 +26,25 @@ export function CodeSidePanel({
     isFullWidth
 }: CodeSidePanelProps) {
     const [viewMode, setViewMode] = useState<'editor' | 'diff'>('diff');
-    const [localOriginalCode, setLocalOriginalCode] = useState(originalCode);
+    const [localOriginalCode, setLocalOriginalCode] = useState(originalCode ?? '');
     const {
         width, setWidth, isResizing, isExpanded, setIsExpanded, startResizing
     } = useResizing(window.innerWidth > 1200 ? 600 : 500);
 
+    // 1. Сброс стейта при полной очистке (Clear Chat)
     useEffect(() => {
-        setLocalOriginalCode(originalCode);
+        if (originalCode === '' && modifiedCode === '') {
+            setLocalOriginalCode('');
+            setPreviewFrozenCode(null);
+        }
+    }, [originalCode, modifiedCode]);
+
+    // 2. Синхронизация при загрузке нового базового кода
+    useEffect(() => {
+        setLocalOriginalCode(originalCode ?? '');
+        if (originalCode !== undefined) {
+            setPreviewFrozenCode(null);
+        }
     }, [originalCode]);
 
     const activeDiffContentRef = useRef(activeDiffContent);
@@ -70,9 +82,13 @@ export function CodeSidePanel({
             setPreviewFrozenCode(null);
             return;
         }
-        const result = applyDiffWithDiagnostics(baseCodeRef.current, activeDiffContent);
+        // Используем originalCode (uiBaselineCode из MainLayout) если он задан,
+        // иначе modifiedCode — это предотвращает применение диффа к устаревшему
+        // localOriginalCode из прошлой сессии (до перезагрузки/сброса).
+        const baseForDiff = originalCode || modifiedCode;
+        const result = applyDiffWithDiagnostics(baseForDiff, activeDiffContent);
         setPreviewFrozenCode(result.code);
-    }, [activeDiffContent]);
+    }, [activeDiffContent, originalCode, modifiedCode]);
 
     // Ref-флаг для блокировки onChange во время превью.
     // Устанавливаем СИНХРОННО во время рендера — Monaco стреляет onDidChangeModelContent
@@ -88,6 +104,17 @@ export function CodeSidePanel({
         } else if (!activeDiffContent && viewMode === 'diff') {
             setViewMode('editor');
             setDiffChanges([]);
+            // Явно очищаем viewZones (кнопки Принять/Отменить) при сбросе диффа,
+            // чтобы они не "залипали" на экране при очистке чата.
+            if (diffEditorRef.current) {
+                const editor = diffEditorRef.current.getModifiedEditor();
+                if (editor) {
+                    editor.changeViewZones((accessor: any) => {
+                        viewZoneIdsRef.current.forEach(id => accessor.removeZone(id));
+                        viewZoneIdsRef.current = [];
+                    });
+                }
+            }
         }
 
         if (diffEditorRef.current?.updateInlineWidgetsRef && activeDiffContent) {
@@ -238,12 +265,18 @@ export function CodeSidePanel({
                             });
 
                             const updateInlineWidgets = () => {
+                                // Всегда очищаем старые зоны перед перерисовкой или выходом
+                                modifiedEditor.changeViewZones((accessor: any) => {
+                                    viewZoneIdsRef.current.forEach(id => accessor.removeZone(id));
+                                    viewZoneIdsRef.current = [];
+                                });
+
                                 const changes = editor.getLineChanges();
                                 setDiffChanges(changes || []);
 
                                 // Авто-скролл к первому изменению при первом появлении диффа.
                                 // Решает проблему: Monaco при вставке строк в начало файла
-                                // (originalStartLineNumber=0) скроллит к "оригинальной строке 1",
+                                // (originalStartLineNumber=0) скроллит к "оригинальной строке "
                                 // которая в modified стоит после вставленных строк → зелёные
                                 // строки уходят выше экрана и оказываются невидимы.
                                 if (changes && changes.length > 0 && !hasAutoScrolledRef.current) {
@@ -254,11 +287,6 @@ export function CodeSidePanel({
                                         || 1;
                                     modifiedEditor.revealLineInCenter(targetLine);
                                 }
-
-                                modifiedEditor.changeViewZones((accessor: any) => {
-                                    viewZoneIdsRef.current.forEach(id => accessor.removeZone(id));
-                                    viewZoneIdsRef.current = [];
-                                });
 
                                 const currentContent = activeDiffContentRef.current;
                                 if (!currentContent || changes === null) return;
