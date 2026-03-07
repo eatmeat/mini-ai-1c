@@ -1,3 +1,4 @@
+use crate::index;
 use ignore::WalkBuilder;
 use regex::Regex;
 use std::fs::File;
@@ -172,8 +173,8 @@ pub fn search_code_in_file_set(
 }
 
 fn search_file(path: &Path, pattern: &Regex, root: &Path) -> Vec<SearchResult> {
-    let file = match File::open(path) {
-        Ok(f) => f,
+    let content = match index::read_file_to_string_lossy(path) {
+        Ok(s) => s,
         Err(_) => return vec![],
     };
 
@@ -182,19 +183,13 @@ fn search_file(path: &Path, pattern: &Regex, root: &Path) -> Vec<SearchResult> {
         .map(|p| p.to_string_lossy().replace('\\', "/"))
         .unwrap_or_else(|_| path.to_string_lossy().replace('\\', "/"));
 
-    let reader = BufReader::new(file);
     let mut results = Vec::new();
-
-    for (idx, line) in reader.lines().enumerate() {
-        let line = match line {
-            Ok(l) => l,
-            Err(_) => continue,
-        };
-        if pattern.is_match(&line) {
+    for (idx, line) in content.lines().enumerate() {
+        if pattern.is_match(line) {
             results.push(SearchResult {
                 file: rel_path.clone(),
                 line: (idx + 1) as u32,
-                snippet: line,
+                snippet: line.to_string(),
             });
         }
     }
@@ -355,29 +350,21 @@ fn scan_one_file_hits(
     root: &Path,
     examples_per_file: usize,
 ) -> Option<FileHits> {
+    let content = index::read_file_to_string_lossy(path).ok()?;
+    
     let rel_path = path
         .strip_prefix(root)
         .map(|p| p.to_string_lossy().replace('\\', "/"))
         .unwrap_or_else(|_| path.to_string_lossy().replace('\\', "/"));
 
-    let file = match File::open(path) {
-        Ok(f) => f,
-        Err(_) => return None,
-    };
-
-    let reader = BufReader::new(file);
     let mut count = 0usize;
     let mut examples: Vec<(u32, String)> = Vec::new();
 
-    for (idx, line) in reader.lines().enumerate() {
-        let line = match line {
-            Ok(l) => l,
-            Err(_) => continue,
-        };
-        if pattern.is_match(&line) {
+    for (idx, line) in content.lines().enumerate() {
+        if pattern.is_match(line) {
             count += 1;
             if examples.len() < examples_per_file {
-                examples.push(((idx + 1) as u32, line));
+                examples.push(((idx + 1) as u32, line.to_string()));
             }
         }
     }

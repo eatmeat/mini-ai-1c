@@ -48,6 +48,21 @@ pub fn build_metadata(root: &Path, db_path: &Path) -> Result<usize, String> {
     if config_dump.exists() && !object_ids.is_empty() {
         parse_config_dump_info(&config_dump, &conn, &object_ids)
             .unwrap_or_else(|e| eprintln!("[1c-search] ConfigDumpInfo.xml: {}", e));
+    } else if !config_dump.exists() && !object_ids.is_empty() {
+        // Step 3: No ConfigDumpInfo.xml — parse per-object XML files for attributes/tabular sections
+        for (key, &obj_id) in &object_ids {
+            let parts: Vec<&str> = key.splitn(2, '.').collect();
+            if parts.len() != 2 { continue; }
+            let obj_type = parts[0];
+            let obj_name = parts[1];
+            if let Some(folder) = obj_type_to_folder(obj_type) {
+                let xml_path = root.join(folder).join(format!("{}.xml", obj_name));
+                if xml_path.exists() {
+                    parse_object_xml(&xml_path, &conn, obj_id)
+                        .unwrap_or_else(|e| eprintln!("[1c-search] {}.xml: {}", obj_name, e));
+                }
+            }
+        }
     }
 
     Ok(object_ids.len())
@@ -60,7 +75,7 @@ fn parse_configuration_xml(
     conn: &Connection,
     object_ids: &mut std::collections::HashMap<String, i64>,
 ) -> Result<(), String> {
-    let content = fs::read_to_string(path)
+    let content = crate::index::read_file_to_string_lossy(path)
         .map_err(|e| format!("Чтение Configuration.xml: {}", e))?;
 
     // Find ChildObjects section
@@ -101,6 +116,37 @@ fn parse_configuration_xml(
     Ok(())
 }
 
+/// Map 1C object type → plural folder name used in config dumps.
+fn obj_type_to_folder(obj_type: &str) -> Option<&'static str> {
+    match obj_type {
+        "Catalog"                    => Some("Catalogs"),
+        "Document"                   => Some("Documents"),
+        "CommonModule"               => Some("CommonModules"),
+        "InformationRegister"        => Some("InformationRegisters"),
+        "AccumulationRegister"       => Some("AccumulationRegisters"),
+        "AccountingRegister"         => Some("AccountingRegisters"),
+        "CalculationRegister"        => Some("CalculationRegisters"),
+        "ExchangePlan"               => Some("ExchangePlans"),
+        "BusinessProcess"            => Some("BusinessProcesses"),
+        "Task"                       => Some("Tasks"),
+        "ChartOfCharacteristicTypes" => Some("ChartsOfCharacteristicTypes"),
+        "ChartOfAccounts"            => Some("ChartsOfAccounts"),
+        "ChartOfCalculationTypes"    => Some("ChartsOfCalculationTypes"),
+        "DataProcessor"              => Some("DataProcessors"),
+        "Report"                     => Some("Reports"),
+        "Enum"                       => Some("Enums"),
+        "Constant"                   => Some("Constants"),
+        "DocumentJournal"            => Some("DocumentJournals"),
+        "FilterCriterion"            => Some("FilterCriteria"),
+        "ScheduledJob"               => Some("ScheduledJobs"),
+        "CommonForm"                 => Some("CommonForms"),
+        "CommonAttribute"            => Some("CommonAttributes"),
+        "CommonCommand"              => Some("CommonCommands"),
+        "Role"                       => Some("Roles"),
+        _ => None,
+    }
+}
+
 /// Parse ConfigDumpInfo.xml: extract `<Metadata name="...">` entries and
 /// populate `object_items` (attributes, tabular sections, forms, commands, modules).
 fn parse_config_dump_info(
@@ -108,7 +154,7 @@ fn parse_config_dump_info(
     conn: &Connection,
     object_ids: &std::collections::HashMap<String, i64>,
 ) -> Result<(), String> {
-    let content = fs::read_to_string(path)
+    let content = crate::index::read_file_to_string_lossy(path)
         .map_err(|e| format!("Чтение ConfigDumpInfo.xml: {}", e))?;
 
     let re = Regex::new(r#"<Metadata\s[^>]*?name="([^"]+)""#)
@@ -176,6 +222,122 @@ fn parse_config_dump_info(
                 }
             }
             _ => {}
+        }
+    }
+
+    conn.execute_batch("COMMIT").map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Parse a per-object XML file (e.g. `Catalogs/Валюты.xml`) and populate
+/// `object_items` with attributes, tabular sections and their columns.
+///
+/// Structure inside top-level `<ChildObjects>`:
+/// ```xml
+/// <Attribute uuid="..."><Properties><Name>AttrName</Name>...</Properties></Attribute>
+/// <TabularSection uuid="...">
+///   <Properties><Name>TSName</Name></Properties>
+///   <ChildObjects>
+///     <Attribute uuid="..."><Properties><Name>ColName</Name>...</Properties></Attribute>
+///   </ChildObjects>
+/// </TabularSection>
+/// ```
+fn parse_object_xml(path: &Path, conn: &Connection, obj_id: i64) -> Result<(), String> {
+    let content = crate::index::read_file_to_string_lossy(path)
+        .map_err(|e| format!("Чтение {}: {}", path.display(), e))?;
+
+    // Find the top-level <ChildObjects> block (after object <Properties>)
+    let child_start = match content.find("<ChildObjects>") {
+        Some(p) => p + "<ChildObjects>".len(),
+        None => return Ok(()),
+    };
+    let section = &content[child_start..];
+
+    let name_re = Regex::new(r"<Name>([^<\n]{1,200})</Name>").map_err(|e| e.to_string())?;
+
+    conn.execute_batch("BEGIN").map_err(|e| e.to_string())?;
+
+    let mut pos = 0;
+    let slen = section.len();
+
+    while pos < slen {
+        let rest = &section[pos..];
+
+        if rest.starts_with("</ChildObjects>") {
+            break;
+        }
+
+        if rest.starts_with("<Attribute ") || rest.starts_with("<Attribute\t") || rest.starts_with("<Attribute\n") {
+            if let Some(close_rel) = rest.find("</Attribute>") {
+                let block = &rest[..close_rel];
+                if let Some(cap) = name_re.captures(block) {
+                    let attr_name = cap[1].trim().to_string();
+                    if !attr_name.is_empty() {
+                        let _ = conn.execute(
+                            "INSERT INTO object_items (object_id, item_type, item_name, parent_section) \
+                             VALUES (?1, 'Attribute', ?2, NULL)",
+                            params![obj_id, attr_name],
+                        );
+                    }
+                }
+                pos += close_rel + "</Attribute>".len();
+                continue;
+            }
+        } else if rest.starts_with("<TabularSection ") || rest.starts_with("<TabularSection\t") || rest.starts_with("<TabularSection\n") {
+            if let Some(close_rel) = rest.find("</TabularSection>") {
+                let ts_block = &rest[..close_rel];
+
+                // Extract TS name from <Properties> (before nested <ChildObjects>)
+                let props_end = ts_block.find("<ChildObjects>").unwrap_or(ts_block.len().min(600));
+                let ts_name = name_re.captures(&ts_block[..props_end])
+                    .map(|c| c[1].trim().to_string())
+                    .unwrap_or_default();
+
+                if !ts_name.is_empty() {
+                    let _ = conn.execute(
+                        "INSERT INTO object_items (object_id, item_type, item_name, parent_section) \
+                         VALUES (?1, 'TabularSection', ?2, NULL)",
+                        params![obj_id, &ts_name],
+                    );
+
+                    // Parse column attributes inside TS's <ChildObjects>
+                    if let Some(ts_child_start) = ts_block.find("<ChildObjects>") {
+                        let ts_children = &ts_block[ts_child_start + "<ChildObjects>".len()..];
+                        let mut ts_pos = 0;
+                        while ts_pos < ts_children.len() {
+                            let ts_rest = &ts_children[ts_pos..];
+                            if ts_rest.starts_with("</ChildObjects>") { break; }
+                            if ts_rest.starts_with("<Attribute ") || ts_rest.starts_with("<Attribute\t") {
+                                if let Some(col_close) = ts_rest.find("</Attribute>") {
+                                    let col_block = &ts_rest[..col_close];
+                                    if let Some(col_cap) = name_re.captures(col_block) {
+                                        let col_name = col_cap[1].trim().to_string();
+                                        if !col_name.is_empty() {
+                                            let _ = conn.execute(
+                                                "INSERT INTO object_items (object_id, item_type, item_name, parent_section) \
+                                                 VALUES (?1, 'Attribute', ?2, ?3)",
+                                                params![obj_id, col_name, &ts_name],
+                                            );
+                                        }
+                                    }
+                                    ts_pos += col_close + "</Attribute>".len();
+                                    continue;
+                                }
+                            }
+                            ts_pos += 1;
+                        }
+                    }
+                }
+                pos += close_rel + "</TabularSection>".len();
+                continue;
+            }
+        }
+
+        // Advance past current '<'
+        if let Some(next) = rest[1..].find('<') {
+            pos += next + 1;
+        } else {
+            break;
         }
     }
 

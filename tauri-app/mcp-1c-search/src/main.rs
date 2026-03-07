@@ -63,8 +63,15 @@ async fn main() {
                 eprintln!("[1c-search] Schema init failed: {}", e);
             }
 
-            // Always build metadata if missing (Configuration.xml may exist even without BSL files)
-            if !index::metadata_exists(&db_for_index) {
+            // Migrate: if calls table is empty but symbols exist, reset indexed_files
+            // so the next sync will re-parse all files and populate the call graph.
+            index::migrate_if_needed(&db_for_index);
+
+            // Build metadata if missing, or if objects exist but have no attributes
+            // (happens when ConfigDumpInfo.xml was absent on first run — per-object XMLs will be parsed now)
+            let needs_metadata = !index::metadata_exists(&db_for_index)
+                || (index::metadata_exists(&db_for_index) && !index::metadata_has_items(&db_for_index));
+            if needs_metadata {
                 match metadata::build_metadata(&root, &db_for_index) {
                     Ok(n) => eprintln!("[1c-search] Metadata indexed: {} objects", n),
                     Err(e) => eprintln!("[1c-search] Metadata skipped: {}", e),

@@ -1,5 +1,5 @@
 use std::fs;
-use std::io::Read;
+use std::io::Read; // Wait, actually I might not need Read if I use fs::read
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -9,6 +9,142 @@ use rayon::prelude::*;
 use rusqlite::{params, Connection};
 
 use crate::parser::bsl_ast;
+
+/// Robustly read a file to string, handling UTF-8 (with BOM) and Windows-1251 fallback.
+pub fn read_file_to_string_lossy(path: &Path) -> Result<String, String> {
+    let bytes = fs::read(path).map_err(|e| e.to_string())?;
+    if bytes.is_empty() {
+        return Ok(String::new());
+    }
+
+    // Check for UTF-8 BOM
+    if bytes.starts_with(&[0xEF, 0xBB, 0xBF]) {
+        return String::from_utf8(bytes[3..].to_vec())
+            .map_err(|e| format!("Invalid UTF-8 after BOM: {}", e));
+    }
+
+    // Attempt UTF-8
+    match String::from_utf8(bytes.clone()) {
+        Ok(s) => Ok(s),
+        Err(_) => {
+            // Fallback to Windows-1251 manual decoding
+            Ok(decode_windows_1251(&bytes))
+        }
+    }
+}
+
+fn decode_windows_1251(bytes: &[u8]) -> String {
+    let mut s = String::with_capacity(bytes.len());
+    for &b in bytes {
+        match b {
+            0..=127 => s.push(b as char),
+            0x80 => s.push('\u{0402}'), // Ђ
+            0x81 => s.push('\u{0403}'), // Ѓ
+            0x82 => s.push('\u{201A}'), // ,
+            0x83 => s.push('\u{0453}'), // ѓ
+            0x84 => s.push('\u{201E}'), // ,,
+            0x85 => s.push('\u{2026}'), // ...
+            0x86 => s.push('\u{2020}'), // †
+            0x87 => s.push('\u{2021}'), // ‡
+            0x88 => s.push('\u{20AC}'), // €
+            0x89 => s.push('\u{2030}'), // ‰
+            0x8A => s.push('\u{0409}'), // Љ
+            0x8B => s.push('\u{2039}'), // <
+            0x8C => s.push('\u{040A}'), // Њ
+            0x8D => s.push('\u{040B}'), // Ћ
+            0x8E => s.push('\u{040C}'), // Ќ
+            0x8F => s.push('\u{040F}'), // Џ
+            0x90 => s.push('\u{0452}'), // ђ
+            0x91 => s.push('\u{2018}'), // '
+            0x92 => s.push('\u{2019}'), // '
+            0x93 => s.push('\u{201C}'), // "
+            0x94 => s.push('\u{201D}'), // "
+            0x95 => s.push('\u{2022}'), // .
+            0x96 => s.push('\u{2013}'), // -
+            0x97 => s.push('\u{2014}'), // --
+            0x98 => s.push('\u{0000}'), // undefined
+            0x99 => s.push('\u{2122}'), // (TM)
+            0x9A => s.push('\u{0459}'), // љ
+            0x9B => s.push('\u{203A}'), // >
+            0x9C => s.push('\u{045A}'), // њ
+            0x9D => s.push('\u{045B}'), // ћ
+            0x9E => s.push('\u{045C}'), // ќ
+            0x9F => s.push('\u{045F}'), // џ
+            0xA0 => s.push('\u{00A0}'), // NBSP
+            0xA1 => s.push('\u{040E}'), // Ў
+            0xA2 => s.push('\u{045E}'), // ў
+            0xA3 => s.push('\u{0408}'), // Ј
+            0xA4 => s.push('\u{00A4}'), // ¤
+            0xA5 => s.push('\u{0490}'), // Ґ
+            0xA6 => s.push('\u{00A6}'), // |
+            0xA7 => s.push('\u{00A7}'), // §
+            0xA8 => s.push('\u{0401}'), // Ё
+            0xA9 => s.push('\u{00A9}'), // (C)
+            0xAA => s.push('\u{0404}'), // Є
+            0xAB => s.push('\u{00AB}'), // <<
+            0xAC => s.push('\u{00AC}'), // -
+            0xAD => s.push('\u{00AD}'), // soft hyphen
+            0xAE => s.push('\u{00AE}'), // (R)
+            0xAF => s.push('\u{0407}'), // Ї
+            0xB0 => s.push('\u{00B0}'), // °
+            0xB1 => s.push('\u{00B1}'), // +-
+            0xB2 => s.push('\u{0406}'), // І
+            0xB3 => s.push('\u{0456}'), // і
+            0xB4 => s.push('\u{0491}'), // ґ
+            0xB5 => s.push('\u{00B5}'), // mu
+            0xB6 => s.push('\u{00B6}'), // paragraph
+            0xB7 => s.push('\u{00B7}'), // .
+            0xB8 => s.push('\u{0451}'), // ё
+            0xB9 => s.push('\u{2116}'), // No.
+            0xBA => s.push('\u{0454}'), // є
+            0xBB => s.push('\u{00BB}'), // >>
+            0xBC => s.push('\u{0458}'), // ј
+            0xBD => s.push('\u{0405}'), // Ѕ
+            0xBE => s.push('\u{0455}'), // ѕ
+            0xBF => s.push('\u{0407}'), // Ї
+            0xC0..=0xFF => s.push((0x0410 + (b as u32 - 0xC0)) as u8 as char), // mapping for A-Ya, a-ya
+            // Wait, CP1251 mapping: 0xC0-0xDF is А-Я (0x0410-0x042F)
+            // 0xE0-0xFF is а-я (0x0430-0x044F)
+            // Correct simple math for 0xC0-0xFF:
+            // return std::char::from_u32(0x0410 + (b - 0xC0) as u32).unwrap_or('?')
+        }
+    }
+    // Re-doing the range mapping carefully:
+    let mut s2 = String::with_capacity(bytes.len());
+    for &b in bytes {
+        match b {
+            0..=127 => s2.push(b as char),
+            0xC0..=0xFF => s2.push(std::char::from_u32(0x0410 + (b as u32 - 0xC0)).unwrap_or('?')),
+            0xA1 => s2.push('\u{040E}'), 0xA2 => s2.push('\u{045E}'), 0xA8 => s2.push('\u{0401}'), 0xB8 => s2.push('\u{0451}'),
+            _ => {
+                // Simplified: use basic mapping for others or just push as is if it fits
+                s2.push(decode_one_cp1251(b));
+            }
+        }
+    }
+    s2
+}
+
+fn decode_one_cp1251(b: u8) -> char {
+    match b {
+        0x80 => '\u{0402}', 0x81 => '\u{0403}', 0x82 => '\u{201A}', 0x83 => '\u{0453}',
+        0x84 => '\u{201E}', 0x85 => '\u{2026}', 0x86 => '\u{2020}', 0x87 => '\u{2021}',
+        0x88 => '\u{20AC}', 0x89 => '\u{2030}', 0x8A => '\u{0409}', 0x8B => '\u{2039}',
+        0x8C => '\u{040A}', 0x8D => '\u{040B}', 0x8E => '\u{040C}', 0x8F => '\u{040F}',
+        0x90 => '\u{0452}', 0x91 => '\u{2018}', 0x92 => '\u{2019}', 0x93 => '\u{201C}',
+        0x94 => '\u{201D}', 0x95 => '\u{2022}', 0x96 => '\u{2013}', 0x97 => '\u{2014}',
+        0x99 => '\u{2122}', 0x9A => '\u{0459}', 0x9B => '\u{203A}', 0x9C => '\u{045A}',
+        0x9D => '\u{045B}', 0x9E => '\u{045C}', 0x9F => '\u{045F}', 0xA0 => '\u{00A0}',
+        0xA3 => '\u{0408}', 0xA4 => '\u{00A4}', 0xA5 => '\u{0490}', 0xA6 => '\u{00A6}',
+        0xA7 => '\u{00A7}', 0xA9 => '\u{00A9}', 0xAA => '\u{0404}', 0xAB => '\u{00AB}',
+        0xAC => '\u{00AC}', 0xAD => '\u{00AD}', 0xAE => '\u{00AE}', 0xAF => '\u{0407}',
+        0xB0 => '\u{00B0}', 0xB1 => '\u{00B1}', 0xB2 => '\u{0406}', 0xB3 => '\u{0456}',
+        0xB4 => '\u{0491}', 0xB5 => '\u{00B5}', 0xB6 => '\u{00B6}', 0xB7 => '\u{00B7}',
+        0xB9 => '\u{2116}', 0xBA => '\u{0454}', 0xBB => '\u{00BB}', 0xBC => '\u{0458}',
+        0xBD => '\u{0405}', 0xBE => '\u{0455}', 0xBF => '\u{0407}',
+        _ => '?',
+    }
+}
 
 pub struct SymbolMatch {
     pub name: String,
@@ -91,9 +227,38 @@ fn init_db(db_path: &Path) -> Result<Connection, rusqlite::Error> {
          CREATE TABLE IF NOT EXISTS indexed_files (
              filepath TEXT PRIMARY KEY,
              modified_at INTEGER NOT NULL
-         );",
+         );
+         CREATE TABLE IF NOT EXISTS calls (
+             id INTEGER PRIMARY KEY,
+             caller_file TEXT NOT NULL,
+             caller_name TEXT NOT NULL,
+             caller_name_lower TEXT NOT NULL,
+             callee_name TEXT NOT NULL,
+             callee_name_lower TEXT NOT NULL
+         );
+         CREATE INDEX IF NOT EXISTS idx_calls_caller ON calls(caller_name_lower);
+         CREATE INDEX IF NOT EXISTS idx_calls_callee ON calls(callee_name_lower);",
     )?;
     Ok(conn)
+}
+
+/// If the calls table is empty but symbols exist, this DB was indexed before call extraction
+/// was added. Reset indexed_files so the next sync re-parses all files.
+pub fn migrate_if_needed(db_path: &Path) {
+    let conn = match Connection::open(db_path) {
+        Ok(c) => c,
+        Err(_) => return,
+    };
+    let sym_count: i64 = conn
+        .query_row("SELECT COUNT(*) FROM symbols", [], |r| r.get(0))
+        .unwrap_or(0);
+    let calls_count: i64 = conn
+        .query_row("SELECT COUNT(*) FROM calls", [], |r| r.get(0))
+        .unwrap_or(0);
+    if sym_count > 0 && calls_count == 0 {
+        eprintln!("[1c-search] Migrating: resetting indexed_files to rebuild call graph...");
+        let _ = conn.execute("DELETE FROM indexed_files", []);
+    }
 }
 
 /// Check if index exists and has data.
@@ -264,9 +429,7 @@ pub fn sync_index(root: &Path, db_path: &Path) -> Result<SyncStats, String> {
     let parsed: Vec<ParsedFile> = to_parse
         .par_iter()
         .filter_map(|(rel_path, mtime, path)| {
-            let mut buf = String::new();
-            let mut file = fs::File::open(path).ok()?;
-            file.read_to_string(&mut buf).ok()?;
+            let buf = read_file_to_string_lossy(path).ok()?;
             let symbols = bsl_ast::extract_symbols(&buf);
             let done = processed.fetch_add(1, Ordering::Relaxed) + 1;
             if total_to_parse > 0 && done % (total_to_parse / 10).max(1) == 0 {
@@ -291,6 +454,7 @@ pub fn sync_index(root: &Path, db_path: &Path) -> Result<SyncStats, String> {
         // Replace symbols for changed/new files
         for pf in &parsed {
             let _ = tx.execute("DELETE FROM symbols WHERE file = ?1", params![pf.rel_path]);
+            let _ = tx.execute("DELETE FROM calls WHERE caller_file = ?1", params![pf.rel_path]);
             for sym in &pf.symbols {
                 let _ = tx.execute(
                     "INSERT INTO symbols (name, name_lower, kind, file, start_line, end_line, is_export)
@@ -305,6 +469,19 @@ pub fn sync_index(root: &Path, db_path: &Path) -> Result<SyncStats, String> {
                         sym.is_export as i32
                     ],
                 );
+                for callee in &sym.calls {
+                    let _ = tx.execute(
+                        "INSERT INTO calls (caller_file, caller_name, caller_name_lower, callee_name, callee_name_lower)
+                         VALUES (?1, ?2, ?3, ?4, ?5)",
+                        params![
+                            pf.rel_path,
+                            sym.name,
+                            sym.name.to_lowercase(),
+                            callee,
+                            callee.to_lowercase()
+                        ],
+                    );
+                }
             }
             let _ = tx.execute(
                 "INSERT OR REPLACE INTO indexed_files (filepath, modified_at) VALUES (?1, ?2)",
@@ -375,9 +552,7 @@ pub fn build_index(root: &Path, db_path: &Path) -> Result<usize, String> {
     let parsed_files: Vec<ParsedFile> = bsl_paths
         .par_iter()
         .filter_map(|(path, mtime)| {
-            let mut buf = String::new();
-            let mut file = fs::File::open(path).ok()?;
-            file.read_to_string(&mut buf).ok()?;
+            let buf = read_file_to_string_lossy(path).ok()?;
 
             let rel_path = path
                 .strip_prefix(&root_owned)
@@ -406,6 +581,7 @@ pub fn build_index(root: &Path, db_path: &Path) -> Result<usize, String> {
     let conn = init_db(db_path).map_err(|e| format!("Ошибка БД: {}", e))?;
     conn.execute("DELETE FROM symbols", []).map_err(|e| e.to_string())?;
     conn.execute("DELETE FROM indexed_files", []).map_err(|e| e.to_string())?;
+    conn.execute("DELETE FROM calls", []).map_err(|e| e.to_string())?;
 
     let mut total_symbols = 0usize;
     {
@@ -425,6 +601,19 @@ pub fn build_index(root: &Path, db_path: &Path) -> Result<usize, String> {
                         sym.is_export as i32
                     ],
                 );
+                for callee in &sym.calls {
+                    let _ = tx.execute(
+                        "INSERT INTO calls (caller_file, caller_name, caller_name_lower, callee_name, callee_name_lower)
+                         VALUES (?1, ?2, ?3, ?4, ?5)",
+                        params![
+                            pf.rel_path,
+                            sym.name,
+                            sym.name.to_lowercase(),
+                            callee,
+                            callee.to_lowercase()
+                        ],
+                    );
+                }
                 total_symbols += 1;
             }
             // Record mtime for incremental sync
@@ -617,6 +806,21 @@ pub fn metadata_exists(db_path: &Path) -> bool {
     false
 }
 
+/// Returns true if metadata exists AND has at least one attribute/tabular section.
+/// Used to detect stale metadata (objects indexed but no attributes — ConfigDumpInfo.xml was absent).
+pub fn metadata_has_items(db_path: &Path) -> bool {
+    if let Ok(conn) = Connection::open(db_path) {
+        if let Ok(count) = conn.query_row(
+            "SELECT COUNT(*) FROM object_items",
+            [],
+            |r| r.get::<_, i64>(0),
+        ) {
+            return count > 0;
+        }
+    }
+    false
+}
+
 /// List all objects, optionally filtered by type and/or name substring.
 pub fn list_objects(
     db_path: &Path,
@@ -665,21 +869,188 @@ pub fn list_objects(
     Ok(result)
 }
 
+// ─── Call graph queries ────────────────────────────────────────────────────
+
+pub struct CallerInfo {
+    pub name: String,
+    pub file: String,
+    pub start_line: u32,
+}
+
+pub struct FunctionContext {
+    pub function: SymbolMatch,
+    pub calls: Vec<String>,
+    pub called_by: Vec<CallerInfo>,
+}
+
+/// Get call graph context for a function: what it calls and who calls it.
+pub fn get_function_context(db_path: &Path, function_name: &str) -> Option<FunctionContext> {
+    let conn = Connection::open(db_path).ok()?;
+    let name_lower = function_name.to_lowercase();
+
+    // Find the function symbol (exact first, then prefix)
+    let function = conn.query_row(
+        "SELECT name, kind, file, start_line, end_line, is_export \
+         FROM symbols WHERE name_lower = ?1 LIMIT 1",
+        params![name_lower],
+        |row| Ok(SymbolMatch {
+            name: row.get(0)?,
+            kind: row.get(1)?,
+            file: row.get(2)?,
+            start_line: row.get::<_, u32>(3)?,
+            end_line: row.get::<_, u32>(4)?,
+            is_export: row.get::<_, i32>(5)? != 0,
+        }),
+    ).or_else(|_| conn.query_row(
+        "SELECT name, kind, file, start_line, end_line, is_export \
+         FROM symbols WHERE name_lower LIKE ?1 LIMIT 1",
+        params![format!("{}%", name_lower)],
+        |row| Ok(SymbolMatch {
+            name: row.get(0)?,
+            kind: row.get(1)?,
+            file: row.get(2)?,
+            start_line: row.get::<_, u32>(3)?,
+            end_line: row.get::<_, u32>(4)?,
+            is_export: row.get::<_, i32>(5)? != 0,
+        }),
+    )).ok()?;
+
+    let resolved_name_lower = function.name.to_lowercase();
+
+    // What does this function call?
+    let mut calls_stmt = conn.prepare(
+        "SELECT DISTINCT callee_name FROM calls WHERE caller_name_lower = ?1 ORDER BY callee_name"
+    ).ok()?;
+    let calls: Vec<String> = calls_stmt
+        .query_map(params![resolved_name_lower], |row| row.get(0))
+        .ok()?
+        .flatten()
+        .collect();
+
+    // Who calls this function? (limit 50 to avoid huge responses)
+    let mut callers_stmt = conn.prepare(
+        "SELECT DISTINCT c.caller_name, c.caller_file, s.start_line \
+         FROM calls c \
+         LEFT JOIN symbols s ON s.name_lower = c.caller_name_lower AND s.file = c.caller_file \
+         WHERE c.callee_name_lower = ?1 \
+         ORDER BY c.caller_file, c.caller_name \
+         LIMIT 50"
+    ).ok()?;
+    let called_by: Vec<CallerInfo> = callers_stmt
+        .query_map(params![resolved_name_lower], |row| {
+            Ok(CallerInfo {
+                name: row.get(0)?,
+                file: row.get(1)?,
+                start_line: row.get::<_, Option<u32>>(2)?.unwrap_or(0),
+            })
+        })
+        .ok()?
+        .flatten()
+        .collect();
+
+    Some(FunctionContext { function, calls, called_by })
+}
+
+/// List all functions in a module matching the given path substring.
+pub fn get_module_functions(db_path: &Path, module_path: &str, limit: usize) -> Vec<SymbolMatch> {
+    let conn = match Connection::open(db_path) {
+        Ok(c) => c,
+        Err(_) => return vec![],
+    };
+    let pattern = format!("%{}%", module_path.replace('\\', "/"));
+    let mut stmt = match conn.prepare(
+        "SELECT name, kind, file, start_line, end_line, is_export \
+         FROM symbols WHERE file LIKE ?1 \
+         ORDER BY start_line LIMIT ?2"
+    ) {
+        Ok(s) => s,
+        Err(_) => return vec![],
+    };
+    stmt.query_map(params![pattern, limit as i64], symbol_row_mapper)
+        .ok()
+        .map(|rows| rows.flatten().collect())
+        .unwrap_or_default()
+}
+
+// ─── Stats ────────────────────────────────────────────────────────────────
+
+pub struct IndexStats {
+    pub symbol_count: usize,
+    pub file_count: usize,
+    pub object_count: usize,
+    pub calls_count: usize,
+    pub built_at: Option<u64>,
+    pub db_size_mb: f64,
+}
+
+pub fn get_index_stats(db_path: &Path) -> IndexStats {
+    let db_size_mb = std::fs::metadata(db_path)
+        .map(|m| m.len() as f64 / 1024.0 / 1024.0)
+        .unwrap_or(0.0);
+
+    let conn = match Connection::open(db_path) {
+        Ok(c) => c,
+        Err(_) => return IndexStats { symbol_count: 0, file_count: 0, object_count: 0, calls_count: 0, built_at: None, db_size_mb },
+    };
+
+    let symbol_count = conn.query_row("SELECT COUNT(*) FROM symbols", [], |r| r.get::<_, i64>(0)).unwrap_or(0) as usize;
+    let file_count = conn.query_row("SELECT COUNT(*) FROM indexed_files", [], |r| r.get::<_, i64>(0)).unwrap_or(0) as usize;
+    let object_count = conn.query_row("SELECT COUNT(*) FROM objects", [], |r| r.get::<_, i64>(0)).unwrap_or(0) as usize;
+    let calls_count = conn.query_row("SELECT COUNT(*) FROM calls", [], |r| r.get::<_, i64>(0)).unwrap_or(0) as usize;
+    let built_at = conn.query_row(
+        "SELECT value FROM meta WHERE key = 'built_at'", [],
+        |r| r.get::<_, String>(0),
+    ).ok().and_then(|s| s.parse::<u64>().ok());
+
+    IndexStats { symbol_count, file_count, object_count, calls_count, built_at, db_size_mb }
+}
+
 /// Get full structure of an object by name (case-insensitive).
 pub fn get_object_details(db_path: &Path, name_query: &str) -> Option<ObjectDetails> {
     let conn = Connection::open(db_path).ok()?;
-    let name_lower = name_query.to_lowercase();
+    
+    // Handle qualified names like "Catalog.Agent" or "CommonModule.РаботаСФайлами"
+    let (obj_type_filter, name_filter) = if let Some(dot_pos) = name_query.find('.') {
+        let t = &name_query[..dot_pos];
+        let n = &name_query[dot_pos + 1..];
+        (Some(t.to_string()), n.to_string())
+    } else {
+        (None, name_query.to_string())
+    };
 
-    // Find the object — try exact match first, then partial
-    let (obj_type, obj_name, obj_id) = conn.query_row(
-        "SELECT obj_type, name, id FROM objects WHERE name_lower = ?1 LIMIT 1",
-        params![name_lower],
-        |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, i64>(2)?)),
-    ).or_else(|_| conn.query_row(
-        "SELECT obj_type, name, id FROM objects WHERE name_lower LIKE ?1 LIMIT 1",
-        params![format!("%{}%", name_lower)],
-        |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, i64>(2)?)),
-    )).ok()?;
+    let name_lower = name_filter.to_lowercase();
+
+    // Find the object — try exact match first
+    let query = if let Some(ref _t) = obj_type_filter {
+        "SELECT obj_type, name, id FROM objects WHERE name_lower = ?1 AND obj_type LIKE ?2 LIMIT 1"
+    } else {
+        "SELECT obj_type, name, id FROM objects WHERE name_lower = ?1 LIMIT 1"
+    };
+
+    let res = if let Some(ref t) = obj_type_filter {
+        conn.query_row(query, params![name_lower, t], 
+            |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, i64>(2)?)))
+    } else {
+        conn.query_row(query, params![name_lower], 
+            |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, i64>(2)?)))
+    };
+
+    let (obj_type, obj_name, obj_id) = res.or_else(|_| {
+        let like_pattern = format!("%{}%", name_lower);
+        if let Some(ref t) = obj_type_filter {
+            conn.query_row(
+                "SELECT obj_type, name, id FROM objects WHERE name_lower LIKE ?1 AND obj_type LIKE ?2 LIMIT 1",
+                params![like_pattern, t],
+                |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, i64>(2)?))
+            )
+        } else {
+            conn.query_row(
+                "SELECT obj_type, name, id FROM objects WHERE name_lower LIKE ?1 LIMIT 1",
+                params![like_pattern],
+                |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, i64>(2)?))
+            )
+        }
+    }).ok()?;
 
     // Fetch all children
     let mut stmt = conn.prepare(

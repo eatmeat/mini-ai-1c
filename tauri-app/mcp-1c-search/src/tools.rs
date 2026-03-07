@@ -228,6 +228,47 @@ pub fn list_tools() -> Vec<Value> {
                 "required": ["object"]
             }
         }),
+        json!({
+            "name": "get_function_context",
+            "description": "Граф вызовов функции или процедуры: что она вызывает и кто её вызывает. Помогает понять зависимости и контекст использования.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "function_name": {
+                        "type": "string",
+                        "description": "Имя функции или процедуры (например: ПровестиДокумент, РассчитатьСумму)"
+                    }
+                },
+                "required": ["function_name"]
+            }
+        }),
+        json!({
+            "name": "get_module_functions",
+            "description": "Список всех процедур и функций модуля BSL. Полезно для ориентации в крупном модуле без поиска по тексту.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "module_path": {
+                        "type": "string",
+                        "description": "Путь к модулю или его имя. Форматы: 'CommonModule.МодульИмя', 'CommonModules/МодульИмя/Module.bsl', просто 'МодульИмя'"
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Максимум результатов (по умолчанию 200)",
+                        "default": 200
+                    }
+                },
+                "required": ["module_path"]
+            }
+        }),
+        json!({
+            "name": "stats",
+            "description": "Статистика символьного индекса конфигурации 1С: количество символов, файлов, объектов, рёбер графа вызовов.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {}
+            }
+        }),
     ]
 }
 
@@ -247,6 +288,9 @@ pub async fn call_tool(
         "get_object_structure" => handle_get_object_structure(args, db_path, config_path).await,
         "find_references" => handle_find_references(args, config_path).await,
         "impact_analysis" => handle_impact_analysis(args, config_path, db_path).await,
+        "get_function_context" => handle_get_function_context(args, db_path).await,
+        "get_module_functions" => handle_get_module_functions(args, db_path).await,
+        "stats" => handle_stats(db_path).await,
         "sync_index" => handle_sync_index(config_path, db_path).await,
         _ => Err(format!("Неизвестный инструмент: {}", name)),
     };
@@ -369,9 +413,14 @@ async fn handle_search_code(
     );
     for r in &results {
         let ext = r.file.rsplit('.').next().unwrap_or("bsl");
+        // Enrich with containing function from symbol index
+        let containing = db_path.as_ref()
+            .and_then(|db| index::find_symbol_at_line(db, &r.file, r.line))
+            .map(|sym| format!(" _(в {}_)", sym.name))
+            .unwrap_or_default();
         text.push_str(&format!(
-            "**{}:{}**\n```{}\n{}\n```\n\n",
-            r.file, r.line, ext, r.snippet.trim()
+            "**{}:{}**{}\n```{}\n{}\n```\n\n",
+            r.file, r.line, containing, ext, r.snippet.trim()
         ));
     }
     if timed_out {
@@ -1083,6 +1132,154 @@ async fn handle_sync_index(
             stats.added, stats.updated, stats.removed, stats.total_symbols
         )
     };
+
+    Ok(json!({ "content": [{ "type": "text", "text": text }] }))
+}
+
+// ─── get_function_context ────────────────────────────────────────────────────
+
+async fn handle_get_function_context(
+    args: &Value,
+    db_path: &Option<PathBuf>,
+) -> Result<Value, String> {
+    let function_name = args["function_name"].as_str().ok_or("Параметр 'function_name' обязателен")?;
+    let db = db_path.as_ref().ok_or("Индекс символов не настроен")?;
+
+    let ctx = index::get_function_context(db, function_name)
+        .ok_or_else(|| format!("Функция '{}' не найдена в индексе", function_name))?;
+
+    let kind_label = if ctx.function.kind == "function" { "Функция" } else { "Процедура" };
+    let export_label = if ctx.function.is_export { " Экспорт" } else { "" };
+
+    let mut text = format!(
+        "## {}{} ({}, {}:{})\n\n",
+        ctx.function.name, export_label, kind_label,
+        ctx.function.file, ctx.function.start_line
+    );
+
+    if ctx.calls.is_empty() {
+        text.push_str("**Вызывает:** *(нет вызовов в индексе)*\n\n");
+    } else {
+        text.push_str(&format!("**Вызывает ({}):**\n", ctx.calls.len()));
+        for callee in &ctx.calls {
+            text.push_str(&format!("- {}\n", callee));
+        }
+        text.push('\n');
+    }
+
+    if ctx.called_by.is_empty() {
+        text.push_str("**Вызывается из:** *(нет вызывающих в индексе)*\n");
+    } else {
+        text.push_str(&format!("**Вызывается из ({}):**\n", ctx.called_by.len()));
+        for caller in &ctx.called_by {
+            if caller.start_line > 0 {
+                text.push_str(&format!("- {} ({}:{})\n", caller.name, caller.file, caller.start_line));
+            } else {
+                text.push_str(&format!("- {} ({})\n", caller.name, caller.file));
+            }
+        }
+    }
+
+    Ok(json!({ "content": [{ "type": "text", "text": text }] }))
+}
+
+// ─── get_module_functions ────────────────────────────────────────────────────
+
+async fn handle_get_module_functions(
+    args: &Value,
+    db_path: &Option<PathBuf>,
+) -> Result<Value, String> {
+    let module_path = args["module_path"].as_str().ok_or("Параметр 'module_path' обязателен")?;
+    let limit = args["limit"].as_u64().unwrap_or(200).clamp(1, 500) as usize;
+    let db = db_path.as_ref().ok_or("Индекс символов не настроен")?;
+
+    // Resolve "CommonModule.МодульИмя" → "CommonModules/МодульИмя"
+    let resolved = if let Some(dot) = module_path.find('.') {
+        let type_part = &module_path[..dot];
+        let name_part = &module_path[dot + 1..];
+        if let Some(folder) = object_type_to_folder(type_part) {
+            format!("{}/{}", folder, name_part)
+        } else {
+            module_path.to_string()
+        }
+    } else {
+        module_path.to_string()
+    };
+
+    let symbols = index::get_module_functions(db, &resolved, limit);
+
+    if symbols.is_empty() {
+        return Ok(json!({ "content": [{ "type": "text", "text": format!(
+            "Модуль «{}» не найден в индексе или не содержит функций.", module_path
+        )}] }));
+    }
+
+    let first_file = &symbols[0].file;
+    let mut text = format!("## Функции модуля `{}`\n\n", first_file);
+
+    let total = symbols.len();
+    for sym in &symbols {
+        let kind = if sym.kind == "function" { "Функция" } else { "Процедура" };
+        let export = if sym.is_export { " Экспорт" } else { "" };
+        text.push_str(&format!(
+            "- **{}**{} — {} (строка {})\n",
+            sym.name, export, kind, sym.start_line
+        ));
+    }
+
+    if total == limit {
+        text.push_str(&format!("\n*Показано первых {} — уточните путь для фильтрации.*", limit));
+    }
+
+    Ok(json!({ "content": [{ "type": "text", "text": text }] }))
+}
+
+// ─── stats ───────────────────────────────────────────────────────────────────
+
+async fn handle_stats(db_path: &Option<PathBuf>) -> Result<Value, String> {
+    let db = db_path.as_ref().ok_or("Индекс символов не настроен")?;
+    let s = index::get_index_stats(db);
+
+    let built_at_str = s.built_at
+        .map(|ts| {
+            // Simple UTC date from Unix timestamp
+            let secs = ts;
+            let days_total = secs / 86400;
+            let time_of_day = secs % 86400;
+            let hh = time_of_day / 3600;
+            let mm = (time_of_day % 3600) / 60;
+            // Approximate date (good enough for display)
+            let mut y = 1970u64;
+            let mut d = days_total;
+            loop {
+                let leap = (y % 4 == 0 && y % 100 != 0) || y % 400 == 0;
+                let days_in_year = if leap { 366 } else { 365 };
+                if d < days_in_year { break; }
+                d -= days_in_year;
+                y += 1;
+            }
+            let month_days = [31u64, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+            let mut m = 1u64;
+            for &md in &month_days {
+                if d < md { break; }
+                d -= md;
+                m += 1;
+            }
+            format!("{}-{:02}-{:02} {:02}:{:02} UTC", y, m, d + 1, hh, mm)
+        })
+        .unwrap_or_else(|| "неизвестно".to_string());
+
+    let text = format!(
+        "## Статистика индекса\n\
+        - Символов (функции/процедуры): {}\n\
+        - Проиндексировано файлов: {}\n\
+        - Объектов метаданных: {}\n\
+        - Рёбер графа вызовов: {}\n\
+        - Размер БД: {:.1} МБ\n\
+        - Построен: {}",
+        s.symbol_count, s.file_count, s.object_count,
+        s.calls_count, s.db_size_mb, built_at_str
+    );
 
     Ok(json!({ "content": [{ "type": "text", "text": text }] }))
 }
