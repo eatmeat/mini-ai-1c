@@ -64,8 +64,8 @@ class OneCApiClient {
         return id;
     }
 
-    async createConversation(programmingLanguage = "1C (BSL)", scriptLanguage = "1C (BSL)"): Promise<string> {
-        const response = await this.fetchWithRetry(`${BASE_URL}/chat_api/v1/conversations`, { // Removed trailing slash
+    async createConversation(programmingLanguage = "1C (BSL)", skillName = "raw"): Promise<string> {
+        const response = await this.fetchWithRetry(`${BASE_URL}/chat_api/v1/conversations`, {
             method: "POST",
             headers: {
                 "Content-Type": "application/json",
@@ -77,7 +77,7 @@ class OneCApiClient {
                 ui_language: "ru",
                 programming_language: programmingLanguage,
                 script_language: "ru",
-                skill_name: "custom",
+                skill_name: skillName,
                 is_chat: true,
             }),
         });
@@ -154,31 +154,84 @@ class OneCApiClient {
         const DEBUG = process.env.ONEC_AI_DEBUG === "true";
         // Parse SSE
         let fullText = "";
+        let reasoningOnly = false;
         const self = this;
         const parser = createParser({
             onEvent(event) {
+                // Completion marker
+                if (event.data === "[DONE]") return;
+
                 try {
                     const data = JSON.parse(event.data);
                     if (DEBUG) {
-                        console.error(`[1C:Naparnik] SSE Event Data: ${JSON.stringify(data)}`);
+                        console.error(`[1C:Naparnik] SSE Event type=${event.event ?? "message"} Data: ${JSON.stringify(data)}`);
                     }
 
-                    // Handle incremental updates
-                    if (data.content_delta && data.content_delta.content) {
-                        fullText += data.content_delta.content;
+                    // Named event format: response.output_text.delta
+                    if (event.event === "response.output_text.delta" && data.delta) {
+                        fullText += data.delta;
+                        return;
+                    }
+
+                    // Named event format: response.completed — final answer
+                    if (event.event === "response.completed" && data.response?.output) {
+                        for (const item of data.response.output) {
+                            for (const c of (item.content ?? [])) {
+                                if (c.type === "output_text" && c.text) {
+                                    fullText = c.text;
+                                }
+                            }
+                        }
+                        return;
+                    }
+
+                    // OpenAI-like choices format
+                    if (Array.isArray(data.choices) && data.choices.length > 0) {
+                        const choice = data.choices[0];
+                        const delta = choice.delta ?? choice.message ?? {};
+                        if (delta.content && typeof delta.content === "string") {
+                            fullText += delta.content;
+                        }
+                        // finish_reason — not much to do, just note completion
+                        return;
+                    }
+
+                    // Legacy content_delta format
+                    if (data.content_delta) {
+                        const cd = data.content_delta;
+                        // text/content/instruction fields
+                        const piece = cd.text ?? cd.content ?? cd.instruction ?? null;
+                        if (typeof piece === "string") {
+                            fullText += piece;
+                        } else if (piece && typeof piece === "object") {
+                            // content_delta.content.instruction (old nested format)
+                            const nested = piece.text ?? piece.instruction ?? piece.content ?? null;
+                            if (typeof nested === "string") fullText += nested;
+                        }
+                        // Skip reasoning_content — these are thinking tokens, not the answer
+                        return;
                     }
 
                     // Handle full result on finish or assistant role
-                    if (data.role === "assistant" && data.content) {
-                        if (data.content.text) fullText = data.content.text;
-                        else if (data.content.content) fullText = data.content.content;
+                    if (data.role === "assistant") {
+                        if (data.uuid) self.lastMessageId = data.uuid;
+                        if (data.content) {
+                            const c = data.content;
+                            const text = c.text ?? c.instruction ?? c.content ?? null;
+                            if (typeof text === "string") fullText = text;
+                            else if (text && typeof text === "object") {
+                                const nested = text.text ?? text.instruction ?? text.content ?? null;
+                                if (typeof nested === "string") fullText = nested;
+                            }
+                        }
                     }
 
-                    if (data.role === "assistant" && data.uuid) {
-                        self.lastMessageId = data.uuid;
+                    // finished flag
+                    if (data.finished === true && !fullText && data.reasoning_content) {
+                        reasoningOnly = true;
                     }
                 } catch (e) {
-                    // ignore json errors
+                    // ignore json parse errors for non-JSON lines
                 }
             }
         });
@@ -197,6 +250,9 @@ class OneCApiClient {
             reader.releaseLock();
         }
 
+        if (!fullText && reasoningOnly) {
+            throw new Error("Получены только рассуждения модели без итогового ответа. Попробуйте повторить запрос.");
+        }
         return fullText;
     }
 

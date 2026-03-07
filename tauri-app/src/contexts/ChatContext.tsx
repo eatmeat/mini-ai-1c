@@ -202,15 +202,40 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
                                     targetIdx = i; break;
                                 }
                             }
+                            // Fallback: если ID не совпал (пустой ID при анонсировании) — ищем pending
+                            if (targetIdx === -1) {
+                                for (let i = prev.length - 1; i >= 0; i--) {
+                                    if (prev[i].role === 'assistant' && prev[i].toolCalls?.some(tc => tc.status === 'pending' || tc.status === 'executing')) {
+                                        targetIdx = i; break;
+                                    }
+                                }
+                            }
                             if (targetIdx === -1) return prev;
 
                             const last = prev[targetIdx];
+                            let matched = false;
                             const toolCalls = last.toolCalls!.map(tc => {
                                 if (tc.id === event.payload.id) {
+                                    matched = true;
                                     return { ...tc, status: event.payload.status, result: event.payload.result };
                                 }
                                 return tc;
                             });
+                            // Если не нашли по ID — обновляем первый pending
+                            if (!matched) {
+                                let found = false;
+                                return [
+                                    ...prev.slice(0, targetIdx),
+                                    { ...last, toolCalls: last.toolCalls!.map(tc => {
+                                        if (!found && (tc.status === 'pending' || tc.status === 'executing')) {
+                                            found = true;
+                                            return { ...tc, id: event.payload.id, status: event.payload.status, result: event.payload.result };
+                                        }
+                                        return tc;
+                                    })},
+                                    ...prev.slice(targetIdx + 1)
+                                ];
+                            }
 
                             return [
                                 ...prev.slice(0, targetIdx),
