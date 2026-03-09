@@ -301,7 +301,7 @@ export function Header({ bslStatus, nodeAvailable, viewMode, onViewModeChange, o
                     <Trash2 className="w-4 h-4 text-zinc-400 group-hover:text-red-400 transition-colors" />
                 </button>
                 <button
-                    onClick={onOpenSettings}
+                    onClick={() => onOpenSettings()}
                     className="p-2 hover:bg-[#27272a] rounded-lg transition-colors"
                     title="Settings"
                 >

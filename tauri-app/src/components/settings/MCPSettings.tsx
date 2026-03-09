@@ -18,6 +18,7 @@ export interface McpServerConfig {
     command?: string | null;
     args?: string[] | null;
     env?: Record<string, string> | null;
+    headers?: Record<string, string> | null;
 }
 
 export interface McpServerStatus {
