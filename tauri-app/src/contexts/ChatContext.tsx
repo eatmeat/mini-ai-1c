@@ -35,6 +35,7 @@ export interface ChatMessage {
     parts?: MessagePart[];
     diagnostics?: BSLDiagnostic[];
     timestamp: number;
+    variant?: 'warning' | 'info';
 }
 
 // Helper to generate unique IDs
@@ -50,7 +51,7 @@ interface ChatContextType {
     stopChat: () => Promise<void>;
     clearChat: () => void;
     editAndRerun: (messageIndex: number, newContent: string, codeContext?: string, diagnostics?: string[], displayContent?: string, configuratorCtx?: ConfiguratorTitleContext | null) => Promise<void>;
-    addSystemMessage: (content: string) => void;
+    addSystemMessage: (content: string, variant?: 'warning' | 'info') => void;
     removeQueuedMessage: (id: string) => void;
     updateQueuedMessage: (id: string, content: string) => void;
     clearQueue: () => void;
@@ -109,11 +110,15 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
                 if (lastAssistantIdx !== -1) {
                     const last = result[lastAssistantIdx];
                     const newParts = [...(last.parts || [])];
-                    const lastPart = newParts[newParts.length - 1];
-                    if (lastPart && lastPart.type === 'thinking') {
-                        newParts[newParts.length - 1] = { ...lastPart, content: (lastPart.content || '') + thinking };
+                    // Find the last thinking part anywhere (not just last element) — handles interleaved reasoning/content
+                    let lastThinkingIdx = -1;
+                    for (let i = newParts.length - 1; i >= 0; i--) {
+                        if (newParts[i].type === 'thinking') { lastThinkingIdx = i; break; }
+                    }
+                    if (lastThinkingIdx !== -1) {
+                        newParts[lastThinkingIdx] = { ...newParts[lastThinkingIdx], content: (newParts[lastThinkingIdx].content || '') + thinking };
                     } else {
-                        newParts.push({ type: 'thinking', content: thinking });
+                        newParts.unshift({ type: 'thinking', content: thinking });
                     }
                     result = [...result.slice(0, lastAssistantIdx), { ...last, thinking: (last.thinking || '') + thinking, parts: newParts }, ...result.slice(lastAssistantIdx + 1)];
                 } else {
@@ -521,12 +526,14 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
         setMessages([]);
         setChatStatus('');
         setIsLoading(false);
+        // Reset Naparnik conversation session if provider is OneCNaparnik
+        api.clearNaparnikSession().catch(() => {/* non-critical */});
     }, []);
 
-    const addSystemMessage = useCallback((content: string) => {
+    const addSystemMessage = useCallback((content: string, variant?: 'warning' | 'info') => {
         setMessages(prev => [
             ...prev,
-            { id: generateId(), role: 'system', content, parts: [{ type: 'text', content }], timestamp: Date.now() }
+            { id: generateId(), role: 'system', content, parts: [{ type: 'text', content }], timestamp: Date.now(), variant: variant ?? 'warning' }
         ]);
     }, []);
 

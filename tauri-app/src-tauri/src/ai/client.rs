@@ -13,6 +13,14 @@ pub async fn stream_chat_completion(
     messages: Vec<ApiMessage>,
     app_handle: tauri::AppHandle,
 ) -> Result<ApiMessage, String> {
+    // Route 1С:Напарник to its dedicated client (non-OpenAI API)
+    {
+        let p = get_active_profile().ok_or("No active LLM profile")?;
+        if matches!(p.provider, LLMProvider::OneCNaparnik) {
+            return super::naparnik_client::stream_naparnik_completion(messages, app_handle).await;
+        }
+    }
+
     let profile = get_active_profile().ok_or("No active LLM profile")?;
     let (api_key, url) = if matches!(profile.provider, LLMProvider::QwenCli) {
         let token_info = crate::llm::cli_providers::qwen::QwenCliProvider::get_token(&profile.id)?;

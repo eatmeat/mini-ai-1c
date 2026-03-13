@@ -5,7 +5,7 @@ import { useSettings } from '../../contexts/SettingsContext';
 import { useConfigurator } from '../../contexts/ConfiguratorContext';
 import { parseConfiguratorTitle, ConfiguratorTitleContext } from '../../utils/configurator';
 import { MarkdownRenderer, cleanDiffArtifacts } from '../MarkdownRenderer';
-import { Loader2, Square, ArrowUp, Settings, ChevronDown, ChevronRight, Monitor, RefreshCw, FileText, MousePointerClick, Brain, BrainCircuit, Check, X, Terminal, Pencil, Play, Send, User, HardHat, Mic, MoreHorizontal } from 'lucide-react';
+import { Loader2, Square, ArrowUp, Settings, ChevronDown, ChevronRight, Monitor, RefreshCw, FileText, MousePointerClick, Brain, BrainCircuit, Check, X, Terminal, Pencil, Play, Send, User, HardHat, Mic, MoreHorizontal, Info } from 'lucide-react';
 import { useVoiceInput } from '../../voice/useVoiceInput';
 import logo from '../../assets/logo.png';
 import ToolCallBlock from './ToolCallBlock';
@@ -125,7 +125,8 @@ export function ChatArea({
     activeDiffContent
 }: ChatAreaProps) {
     const { messages, isLoading, chatStatus, currentIteration, messageQueue, sendMessage, stopChat, editAndRerun, addSystemMessage, removeQueuedMessage, updateQueuedMessage, clearQueue } = useChat();
-    const { profiles, activeProfileId, setActiveProfile } = useProfiles();
+    const { profiles, activeProfileId, activeProfile, setActiveProfile } = useProfiles();
+    const isNaparnikActive = activeProfile?.provider === 'OneCNaparnik';
     const { settings, updateSettings } = useSettings();
     const { detectedWindows, selectedHwnd, refreshWindows, selectWindow, activeConfigTitle, getCode, parsedTitleContext } = useConfigurator();
 
@@ -190,6 +191,20 @@ export function ChatArea({
             toggleRecording();
         }
     }, [isLoading, isRecording, toggleRecording]);
+
+    // Welcome message when switching to Напарник
+    const prevProfileIdRef = useRef<string | null>(null);
+    useEffect(() => {
+        if (prevProfileIdRef.current === activeProfileId) return;
+        const wasNaparnik = profiles.find(p => p.id === prevProfileIdRef.current)?.provider === 'OneCNaparnik';
+        prevProfileIdRef.current = activeProfileId ?? null;
+        if (isNaparnikActive && !wasNaparnik && messages.length === 0) {
+            addSystemMessage(
+                '1С:Напарник подключён · Поиск по ИТС и документации 1С · Диффы и локальный MCP недоступны',
+                'info'
+            );
+        }
+    }, [activeProfileId]);
 
     // CLI Statuses
     const fetchCliStatuses = async () => {
@@ -408,11 +423,11 @@ export function ChatArea({
                 isSlashCommand = true;
                 displayContent = textToSend; // Сохраняем "/итс вопрос" для отображения
 
-                // Проверка для /итс
-                if (foundCmd.id === 'its') {
+                // Проверка для /итс (пропускаем если активен прямой провайдер Напарника)
+                if (foundCmd.id === 'its' && !isNaparnikActive) {
                     const naparnik = settings?.mcp_servers.find(s => s.id === 'builtin-1c-naparnik');
                     if (!naparnik || !naparnik.enabled) {
-                        alert('Для использования команды /итс необходимо включить MCP сервер "Напарник" в настройках.');
+                        alert('Для использования команды /итс необходимо включить MCP сервер "Напарник" в настройках, либо выбрать профиль "1С:Напарник".');
                         return;
                     }
                 }
@@ -719,18 +734,27 @@ export function ChatArea({
                 <div className={`flex flex-col pb-4 gap-4 px-4 w-full pt-4`}>
                     {messages.map((msg, i) => (
                         <div key={msg.id || i} className={`flex w-full ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                            {/* Системное сообщение (уведомление об ошибках применения диффов) */}
+                            {/* Системное сообщение */}
                             {(msg.role as string) === 'system' ? (
-                                <div className="w-full max-w-full rounded-xl border border-amber-700/40 bg-amber-950/30 px-4 py-3 text-[13px] text-amber-300/90 shadow-sm">
-                                    <div className="flex items-start gap-2">
-                                        <svg className="w-4 h-4 text-amber-400 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.34 16.5c-.77.833.192 2.5 1.732 2.5z" />
-                                        </svg>
-                                        <div className="flex-1 whitespace-pre-wrap leading-relaxed">
-                                            {msg.content}
+                                msg.variant === 'info' ? (
+                                    <div className="w-full max-w-full rounded-xl border border-orange-700/30 bg-orange-950/20 px-4 py-2.5 text-[12px] text-orange-300/80 shadow-sm">
+                                        <div className="flex items-center gap-2">
+                                            <Info className="w-3.5 h-3.5 text-orange-400/70 flex-shrink-0" />
+                                            <span className="leading-relaxed">{msg.content}</span>
                                         </div>
                                     </div>
-                                </div>
+                                ) : (
+                                    <div className="w-full max-w-full rounded-xl border border-amber-700/40 bg-amber-950/30 px-4 py-3 text-[13px] text-amber-300/90 shadow-sm">
+                                        <div className="flex items-start gap-2">
+                                            <svg className="w-4 h-4 text-amber-400 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.34 16.5c-.77.833.192 2.5 1.732 2.5z" />
+                                            </svg>
+                                            <div className="flex-1 whitespace-pre-wrap leading-relaxed">
+                                                {msg.content}
+                                            </div>
+                                        </div>
+                                    </div>
+                                )
                             ) : (
                                 <div className={`p-4 rounded-xl border text-[13px] leading-relaxed group ${msg.role === 'user' ? 'bg-[#1b1b1f] border-zinc-800/80 text-zinc-300 max-w-[90%]' : 'bg-zinc-900/40 border-zinc-800/50 text-zinc-300 shadow-sm w-full max-w-full'}`}>
                                     <div className="min-w-0 flex flex-col gap-3">
@@ -1110,12 +1134,12 @@ export function ChatArea({
                                             <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Ваши профили</span>
                                         </div>
                                         <div className="max-h-[250px] overflow-y-auto custom-scrollbar">
-                                            {profiles.filter(p => p.provider !== 'QwenCli').length > 0 && (
+                                            {profiles.filter(p => p.provider !== 'QwenCli' && p.provider !== 'OneCNaparnik').length > 0 && (
                                                 <>
                                                     <div className="px-3 py-1.5 border-b border-[#27272a] mb-1 sticky top-0 bg-[#09090b] z-10">
                                                         <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Стандартные ассистенты</span>
                                                     </div>
-                                                    {profiles.filter(p => p.provider !== 'QwenCli').map(p => (
+                                                    {profiles.filter(p => p.provider !== 'QwenCli' && p.provider !== 'OneCNaparnik').map(p => (
                                                         <div
                                                             key={p.id}
                                                             className={`group px-3 py-2 flex items-center justify-between cursor-pointer transition-colors ${activeProfileId === p.id ? 'bg-blue-500/10' : 'hover:bg-zinc-800/50'}`}
@@ -1178,6 +1202,29 @@ export function ChatArea({
                                                     })}
                                                 </>
                                             )}
+                                            {profiles.filter(p => p.provider === 'OneCNaparnik').length > 0 && (
+                                                <>
+                                                    <div className="px-3 py-1.5 border-b border-[#27272a] mt-1 mb-1 sticky top-0 bg-[#09090b] z-10">
+                                                        <span className="text-[10px] font-bold text-orange-500/70 uppercase tracking-wider">1С:Напарник</span>
+                                                    </div>
+                                                    {profiles.filter(p => p.provider === 'OneCNaparnik').map(p => (
+                                                        <div
+                                                            key={p.id}
+                                                            className={`group px-3 py-2 flex items-center justify-between cursor-pointer transition-colors ${activeProfileId === p.id ? 'bg-orange-500/10' : 'hover:bg-zinc-800/50'}`}
+                                                            onClick={() => {
+                                                                setActiveProfile(p.id);
+                                                                setShowModelDropdown(false);
+                                                            }}
+                                                        >
+                                                            <div className="flex flex-col gap-0.5 min-w-0">
+                                                                <span className={`text-[12px] font-semibold truncate ${activeProfileId === p.id ? 'text-orange-400' : 'text-zinc-200'}`}>{p.name}</span>
+                                                                <span className="text-[10px] text-zinc-500 truncate">code.1c.ai</span>
+                                                            </div>
+                                                            {activeProfileId === p.id && <Check className="w-3.5 h-3.5 text-orange-500 flex-shrink-0" />}
+                                                        </div>
+                                                    ))}
+                                                </>
+                                            )}
                                         </div>
                                         <div className="p-2 border-t border-[#27272a] mt-1">
                                             <button
@@ -1194,6 +1241,17 @@ export function ChatArea({
                                     </div>
                                 )}
                             </div>
+
+                            {/* Напарник badge */}
+                            {isNaparnikActive && (
+                                <div
+                                    className="flex-shrink-0 flex items-center gap-1 px-2 h-7 rounded-lg bg-orange-500/10 border border-orange-500/20 text-orange-400/80 text-[10px] font-semibold uppercase tracking-wide cursor-default select-none"
+                                    title="1С:Напарник · Поиск по ИТС и документации 1С · Диффы и локальный MCP недоступны"
+                                >
+                                    <Info className="w-3 h-3" />
+                                    ИТС
+                                </div>
+                            )}
 
                             {/* Объединенный Конфигуратор & Код */}
                             <div className="relative flex-shrink-0" id="tour-get-code">

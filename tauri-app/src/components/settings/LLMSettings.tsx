@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { Plus, Save, RefreshCw, Trash2, Check, LogIn, LogOut, Info, X } from 'lucide-react';
+import { openUrl } from '@tauri-apps/plugin-opener';
+import { Plus, Save, RefreshCw, Trash2, Check, LogIn, LogOut, Info, X, ExternalLink } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cliProvidersApi } from '../../api/cli_providers';
 import { QwenAuthModal } from './QwenAuthModal';
@@ -27,6 +28,7 @@ const PROVIDERS = [
     { value: 'Ollama', label: 'Ollama (Local)', defaultModel: 'llama3', defaultUrl: 'http://localhost:11434/v1', type: 'standard' },
     { value: 'QwenCli', label: 'Qwen Code (CLI)', defaultModel: 'coder-model', defaultUrl: 'https://portal.qwen.ai/v1', type: 'cli' },
     { value: 'Custom', label: 'Custom / Other', defaultModel: '', defaultUrl: '', type: 'standard' },
+    { value: 'OneCNaparnik', label: '1С:Напарник', defaultModel: 'naparnik', defaultUrl: 'https://code.1c.ai', type: 'naparnik' },
 ];
 
 export function LLMSettings({ profiles, onUpdate }: LLMSettingsProps) {
@@ -104,6 +106,10 @@ export function LLMSettings({ profiles, onUpdate }: LLMSettingsProps) {
                 profile: editForm,
                 apiKey: newApiKey || null
             });
+            if (newApiKey) {
+                setEditForm(prev => prev ? { ...prev, api_key_encrypted: 'set' } : null);
+                setNewApiKey('');
+            }
             onUpdate();
             setShowSaved(true);
             setTimeout(() => setShowSaved(false), 3000);
@@ -270,6 +276,40 @@ export function LLMSettings({ profiles, onUpdate }: LLMSettingsProps) {
                             </button>
                         </div>
                     </div>
+
+                    {/* 1С:Напарник Group */}
+                    <div className="space-y-2">
+                        <div className="px-1 flex items-center gap-2 opacity-50">
+                            <span className="text-[10px] uppercase font-black tracking-widest text-zinc-400">1С:Напарник</span>
+                            <div className="h-[1px] flex-1 bg-zinc-800"></div>
+                        </div>
+                        <div className="space-y-1.5">
+                            {profiles.profiles.filter(p => p.provider === 'OneCNaparnik').map(p => (
+                                <div
+                                    key={p.id}
+                                    onClick={() => setEditingId(p.id)}
+                                    className={`p-2 sm:p-3 rounded-lg border cursor-pointer transition-all ${editingId === p.id
+                                        ? 'border-orange-400 bg-orange-400/10'
+                                        : 'border-zinc-800 bg-zinc-800 hover:border-zinc-600'
+                                        }`}
+                                >
+                                    <div className="flex justify-between items-center mb-0.5">
+                                        <span className="font-medium text-xs sm:text-sm text-zinc-200 truncate pr-1">{p.name}</span>
+                                        {profiles.active_profile_id === p.id && <Check className="w-3 h-3 text-orange-400 flex-shrink-0" />}
+                                    </div>
+                                    <div className="text-[10px] text-zinc-500 truncate">code.1c.ai</div>
+                                </div>
+                            ))}
+                        </div>
+                        <div className="space-y-1.5 pt-1">
+                            <button
+                                onClick={() => handleCreate('OneCNaparnik')}
+                                className="w-full py-2 flex items-center justify-center gap-2 border border-dashed border-zinc-700 rounded-lg text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300 transition text-[10px] font-medium"
+                            >
+                                <Plus className="w-3 h-3" /> Добавить Напарника
+                            </button>
+                        </div>
+                    </div>
                 </div>
             </div>
 
@@ -315,7 +355,12 @@ export function LLMSettings({ profiles, onUpdate }: LLMSettingsProps) {
                                         <SelectValue />
                                     </SelectTrigger>
                                     <SelectContent>
-                                        {PROVIDERS.find(p => p.value === editForm.provider)?.type === 'cli' ? (
+                                        {editForm.provider === 'OneCNaparnik' ? (
+                                            <>
+                                                <div className="px-2 py-1.5 text-[10px] font-bold text-zinc-500 uppercase tracking-wider">1С:Напарник</div>
+                                                {PROVIDERS.filter(p => p.type === 'naparnik').map(p => <SelectItem key={p.value} value={p.value} className="text-xs">{p.label}</SelectItem>)}
+                                            </>
+                                        ) : PROVIDERS.find(p => p.value === editForm.provider)?.type === 'cli' ? (
                                             <>
                                                 <div className="px-2 py-1.5 text-[10px] font-bold text-zinc-500 uppercase tracking-wider">CLI Провайдеры</div>
                                                 {PROVIDERS.filter(p => p.type === 'cli').map(p => <SelectItem key={p.value} value={p.value} className="text-xs">{p.label}</SelectItem>)}
@@ -422,7 +467,35 @@ export function LLMSettings({ profiles, onUpdate }: LLMSettingsProps) {
                                 </div>
                             )}
 
-                            {editForm.provider !== 'QwenCli' && (
+                            {editForm.provider === 'OneCNaparnik' && (
+                                <div className="p-4 bg-zinc-950/50 rounded-lg border border-zinc-800 space-y-3">
+                                    <label className="text-xs text-zinc-500 uppercase font-bold">Токен code.1c.ai</label>
+                                    <input
+                                        type="password"
+                                        className="w-full bg-zinc-950 border border-zinc-800 rounded-md px-3 h-9 text-sm focus:border-orange-500 outline-none placeholder-zinc-700 text-zinc-200"
+                                        placeholder={editForm.api_key_encrypted ? "•••••••••••• (сохранён)" : "Вставьте токен..."}
+                                        value={newApiKey}
+                                        onChange={e => setNewApiKey(e.target.value)}
+                                    />
+                                    <p className="text-[10px] text-zinc-500 leading-relaxed flex items-start gap-1.5">
+                                        <Info className="w-3 h-3 shrink-0 mt-0.5" />
+                                        <span>
+                                            Получить токен:{' '}
+                                            <button
+                                                type="button"
+                                                onClick={() => openUrl('https://code.1c.ai')}
+                                                className="text-orange-400 hover:text-orange-300 inline-flex items-center gap-0.5 transition-colors"
+                                            >
+                                                code.1c.ai <ExternalLink className="w-2.5 h-2.5" />
+                                            </button>
+                                            {' '}→ Профиль → API токен.
+                                            Токен хранится зашифрованным в системном keychain.
+                                        </span>
+                                    </p>
+                                </div>
+                            )}
+
+                        {editForm.provider !== 'QwenCli' && editForm.provider !== 'OneCNaparnik' && (
                                 <div>
                                     <label className="text-xs text-zinc-500 uppercase font-bold px-1">API Key</label>
                                     <input
@@ -436,7 +509,7 @@ export function LLMSettings({ profiles, onUpdate }: LLMSettingsProps) {
                             )}
                         </div>
 
-                        {PROVIDERS.find(p => p.value === editForm.provider)?.type !== 'cli' && (
+                        {PROVIDERS.find(p => p.value === editForm.provider)?.type !== 'cli' && editForm.provider !== 'OneCNaparnik' && (
                             <div>
                                 <label className="text-xs text-zinc-500 uppercase font-bold px-1">Base URL</label>
                                 <input
@@ -447,8 +520,8 @@ export function LLMSettings({ profiles, onUpdate }: LLMSettingsProps) {
                             </div>
                         )}
 
-                        {/* Model Selection */}
-                        <div className="p-4 bg-zinc-950/50 rounded-lg border border-zinc-800 space-y-4">
+                        {/* Model Selection — hidden for OneCNaparnik */}
+                        {editForm.provider !== 'OneCNaparnik' && <div className="p-4 bg-zinc-950/50 rounded-lg border border-zinc-800 space-y-4">
                             <div className="flex justify-between items-end">
                                 <label className="text-xs text-zinc-500 uppercase font-bold px-1">Model ID</label>
                                 {PROVIDERS.find(p => p.value === editForm.provider)?.type !== 'cli' && (
@@ -555,7 +628,7 @@ export function LLMSettings({ profiles, onUpdate }: LLMSettingsProps) {
                                     </button>
                                 </div>
                             )}
-                        </div>
+                        </div>}
 
                         {/* Save Button */}
                         <div className="pt-4 pb-10">

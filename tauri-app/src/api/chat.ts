@@ -63,3 +63,10 @@ export async function approveTool(): Promise<void> {
 export async function rejectTool(): Promise<void> {
     return await invoke('reject_tool');
 }
+
+/**
+ * Clear 1С:Напарник conversation session (call on chat clear)
+ */
+export async function clearNaparnikSession(): Promise<void> {
+    return await invoke('clear_naparnik_session');
+}

@@ -120,6 +120,17 @@ fn prune_tool_context(messages: &mut Vec<ApiMessage>, max_tokens: usize) {
     }
 }
 
+/// Clear 1С:Напарник session (called on chat clear when provider == OneCNaparnik)
+#[tauri::command]
+pub async fn clear_naparnik_session() -> Result<(), String> {
+    if let Some(profile) = crate::llm_profiles::get_active_profile() {
+        if matches!(profile.provider, crate::llm_profiles::LLMProvider::OneCNaparnik) {
+            crate::ai::naparnik_client::clear_naparnik_session(&profile.id);
+        }
+    }
+    Ok(())
+}
+
 /// Stop the current chat generation
 #[tauri::command]
 pub async fn stop_chat(
@@ -490,7 +501,7 @@ pub async fn stream_chat(
                         let uri = format!("file:///iteration_{}_{}.bsl", current_iteration, idx);
                         // Захватываем и освобождаем lock на каждой итерации
                         let result = {
-                            let mut client = bsl_state.lock().await;
+                            let client = bsl_state.lock().await;
                             client.analyze_code(code, &uri).await
                         };
                         match result {

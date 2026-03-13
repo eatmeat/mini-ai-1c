@@ -2,6 +2,7 @@ import { Settings, PanelRight, Trash2, Maximize2, Minimize2, Pin, MessageSquare,
 import { getCurrentWindow, LogicalSize } from '@tauri-apps/api/window';
 import { useConfigurator } from '../../contexts/ConfiguratorContext';
 import { useSettings } from '../../contexts/SettingsContext';
+import { useProfiles } from '../../contexts/ProfileContext';
 import { useState, useEffect, useRef, useMemo } from 'react';
 
 const PRESET_MCP_NOTIFICATIONS = [
@@ -41,6 +42,7 @@ export function Header({ bslStatus, nodeAvailable, viewMode, onViewModeChange, o
     const [isCompact, setIsCompact] = useState(false);
     const { snapToConfigurator } = useConfigurator();
     const { settings, updateSettings } = useSettings();
+    const { activeProfile } = useProfiles();
     const sliderRef = useRef<HTMLDivElement>(null);
     const isDragging = useRef(false);
     const [notifOpen, setNotifOpen] = useState(false);
@@ -71,13 +73,16 @@ export function Header({ bslStatus, nodeAvailable, viewMode, onViewModeChange, o
 
     const notifications = useMemo(() => {
         if (!settings?.onboarding_completed) return [];
+        const isNaparnikDirect = activeProfile?.provider === 'OneCNaparnik';
         return PRESET_MCP_NOTIFICATIONS.filter(n => {
             if (dismissed[n.id]) return false;
             if (localStorage.getItem(`mcp_notif_dismissed_${n.id}`) === 'true') return false;
+            // Не предлагать включить MCP Напарника если активен прямой провайдер
+            if (n.id === 'builtin-1c-naparnik' && isNaparnikDirect) return false;
             const server = settings.mcp_servers?.find(s => s.id === n.id);
             return server && !server.enabled;
         });
-    }, [settings, dismissed]);
+    }, [settings, dismissed, activeProfile]);
 
     const handleDismiss = (id: string) => {
         localStorage.setItem(`mcp_notif_dismissed_${id}`, 'true');

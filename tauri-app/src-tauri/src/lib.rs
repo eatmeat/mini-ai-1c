@@ -89,6 +89,8 @@ pub fn run() {
             cli_logout,
             cli_get_status,
             cli_refresh_usage,
+            // 1С:Напарник
+            clear_naparnik_session,
         ])
 
         .setup(|app| {
