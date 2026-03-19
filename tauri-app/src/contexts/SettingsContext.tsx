@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import * as api from '../api';
 import { loader } from '@monaco-editor/react';
+import { setConfiguratorRdpMode } from '../api/configurator';
 
 import { AppSettings } from '../types/settings';
 
@@ -19,6 +20,10 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
         try {
             const data = await api.getSettings();
             setSettings(data);
+            // Sync RDP mode with Rust backend on startup
+            if (data.configurator?.rdp_mode) {
+                setConfiguratorRdpMode(true).catch(() => {});
+            }
         } catch (e) {
             console.error("Failed to load settings:", e);
         }

@@ -109,7 +109,7 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({ onComplete }
             // Но лучше полагаться на то, что SettingsContext всё равно сохранит результат
 
             const currentSettings = settings || {
-                configurator: { window_title_pattern: "", selected_window_hwnd: 0 },
+                configurator: { window_title_pattern: "", selected_window_hwnd: 0, rdp_mode: false },
                 bsl_server: {
                     enabled: false,
                     jar_path: "",

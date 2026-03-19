@@ -117,6 +117,7 @@ export interface AppSettings {
     configurator: {
         window_title_pattern: string;
         selected_window_hwnd: number | null;
+        rdp_mode: boolean;
     };
     bsl_server: {
         jar_path: string;

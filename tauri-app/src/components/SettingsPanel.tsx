@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { open } from '@tauri-apps/plugin-dialog';
-import { X, Save, Cpu, Monitor, FileCode, Database, Bug, MessageSquare, Terminal, Sun, Moon } from 'lucide-react';
+import { X, Save, Cpu, Monitor, FileCode, Database, Settings2, MessageSquare, Terminal, Sun, Moon } from 'lucide-react';
 
 import { LLMSettings } from './settings/LLMSettings';
 import { MCPSettings } from './settings/MCPSettings';
@@ -203,7 +203,7 @@ export function SettingsPanel({ isOpen, onClose, initialTab }: SettingsPanelProp
                         { id: 'mcp' as const, label: 'MCP', icon: Database },
                         { id: 'prompts' as const, label: 'Промпты', icon: MessageSquare },
                         { id: 'slash_commands' as const, label: 'Команды', icon: Terminal },
-                        { id: 'debug' as const, label: 'Debug', icon: Bug },
+                        { id: 'debug' as const, label: 'Advanced', icon: Settings2 },
                     ].map((t) => (
                         <button
                             key={t.id}

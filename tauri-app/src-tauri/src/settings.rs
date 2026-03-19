@@ -137,6 +137,8 @@ fn default_slash_commands() -> Vec<SlashCommand> {
 pub struct ConfiguratorSettings {
     pub window_title_pattern: String,
     pub selected_window_hwnd: Option<isize>,
+    #[serde(default)]
+    pub rdp_mode: bool,
 }
 
 impl Default for ConfiguratorSettings {
@@ -144,6 +146,7 @@ impl Default for ConfiguratorSettings {
         Self {
             window_title_pattern: "Конфигуратор".to_string(),
             selected_window_hwnd: None,
+            rdp_mode: false,
         }
     }
 }

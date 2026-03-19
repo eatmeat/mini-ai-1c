@@ -50,6 +50,7 @@ pub fn run() {
             analyze_bsl,
             format_bsl,
             find_configurator_windows_cmd,
+            set_configurator_rdp_mode,
             get_code_from_configurator,
             get_active_fragment_cmd,
             check_selection_state,

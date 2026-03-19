@@ -1,5 +1,4 @@
 use std::fs;
-use std::io::Read; // Wait, actually I might not need Read if I use fs::read
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;

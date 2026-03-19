@@ -69,3 +69,11 @@ export async function checkSelectionState(hwnd: number): Promise<boolean> {
 export async function alignWithConfigurator(hwnd: number): Promise<void> {
     return await invoke('align_with_configurator', { hwnd });
 }
+
+/**
+ * Set RDP compatibility mode for Configurator keyboard operations.
+ * When enabled: disables 1C process filter and uses longer delays.
+ */
+export async function setConfiguratorRdpMode(enabled: boolean): Promise<void> {
+    return await invoke('set_configurator_rdp_mode', { enabled });
+}

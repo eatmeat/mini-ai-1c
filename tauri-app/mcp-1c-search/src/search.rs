@@ -377,6 +377,7 @@ fn scan_one_file_hits(
 }
 
 /// Считает кол-во конфигурационных файлов (`.bsl`, `.xml`) и возвращает `(count, size_in_mb)`.
+#[allow(dead_code)]
 pub fn count_files_and_size(root: &Path) -> (usize, f64) {
     let mut count = 0;
     let mut size_bytes = 0;

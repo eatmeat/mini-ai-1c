@@ -166,6 +166,22 @@ pub async fn undo_last_change(hwnd: isize) -> Result<(), String> {
     }
 }
 
+/// Set RDP compatibility mode for Configurator keyboard operations
+#[tauri::command]
+pub fn set_configurator_rdp_mode(enabled: bool) -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        use crate::configurator;
+        configurator::set_rdp_mode(enabled);
+        Ok(())
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = enabled;
+        Ok(())
+    }
+}
+
 /// Send a hotkey combination to 1C Configurator
 #[tauri::command]
 pub fn send_hotkey_cmd(hwnd: isize, key: u16, modifiers: Vec<u16>) -> Result<(), String> {
